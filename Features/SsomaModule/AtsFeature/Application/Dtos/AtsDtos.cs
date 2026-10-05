@@ -445,6 +445,14 @@ public class AtsGrupoListaItemDto
     public int EjecutantesFirmados { get; set; }
     public int AutorizaFirmados { get; set; }
     public int SsomaFirmados { get; set; }
+    public int ProyectoId { get; set; }
+    /// <summary>PETAR de la cuadrilla a los que todavía les falta la firma de Supervisor o SSOMA.</summary>
+    public int PetaresPendientesFirma { get; set; }
+    /// <summary>Permisos del usuario que abre el listado (se calculan en el servicio) — mismo criterio que el panel de la cuadrilla.</summary>
+    public bool PuedeAutorizar { get; set; }
+    public bool PuedeVistoBuenoSsoma { get; set; }
+    /// <summary>Token del link del Capataz; solo se envía a quien puede ver la cuadrilla y mientras falte su firma.</summary>
+    public string? CapatazLinkToken { get; set; }
 }
 
 public class AtsGrupoListResponseDto

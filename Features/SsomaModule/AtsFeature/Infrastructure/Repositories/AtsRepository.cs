@@ -1095,6 +1095,25 @@ public class AtsRepository : IAtsRepository
         return await ctx.User.Where(u => u.UserId == userId).Select(u => u.Email).FirstOrDefaultAsync();
     }
 
+    public async Task<List<string>> GetEmailsAvisoCadena(int proyectoId)
+    {
+        using var ctx = _factory.CreateDbContext();
+
+        var prevencionistas = await ctx.Worker
+            .Where(w => w.ContrataCasa == "Casa" && w.EmailCorporativo != null && w.PuestoCatalogo != null
+                        && w.PuestoCatalogo.Nombre.ToLower().Contains("prevencionista"))
+            .Select(w => w.EmailCorporativo!).ToListAsync();
+
+        var produccion = await (from v in ctx.Set<Abril_Backend.Infrastructure.Models.WorkerVinculacion>()
+                                join w in ctx.Worker on v.WorkerId equals w.Id
+                                where v.FechaFin == null && v.ProyectoId == proyectoId && v.PuestoCatalogo != null && w.EmailCorporativo != null
+                                      && (v.PuestoCatalogo.Nombre.ToLower().Contains("ingeniero de producción")
+                                          || v.PuestoCatalogo.Nombre.ToLower().Contains("arquitecto de producción"))
+                                select w.EmailCorporativo).ToListAsync();
+
+        return prevencionistas.Concat(produccion.Where(e => e != null).Select(e => e!)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     public async Task<string?> GetEmailCorporativoWorker(int workerId)
     {
         using var ctx = _factory.CreateDbContext();
@@ -1249,9 +1268,12 @@ public class AtsRepository : IAtsRepository
                 g.Id,
                 g.Codigo,
                 g.Revision,
+                g.ProyectoId,
+                g.QrToken,
                 ObsAbiertas = ctx.SsAtsObservacion.Count(o => o.AtsGrupoId == g.Id && o.Estado == "Abierta"),
                 ReqPetar = ctx.SsAtsGrupoRiesgoDetalle.Any(r => r.AtsGrupoId == g.Id && ctx.SsAtsRiesgo.Any(c => c.Id == r.RiesgoId && c.RequierePetar)),
                 NPetares = ctx.SsPetarGrupo.Count(p => p.AtsGrupoId == g.Id),
+                NPetaresPend = ctx.SsPetarGrupo.Count(p => p.AtsGrupoId == g.Id && (p.SupervisorFirmaUrl == null || p.SsomaFirmaUrl == null)),
                 ProyectoNombre = g.Proyecto != null ? g.Proyecto.ProjectDescription : null,
                 g.Actividad, g.TorreNombre, g.Pisos, g.Lugar, g.Fecha, g.Estado,
                 CreadoPorNombre = g.CreadoPorWorker != null && g.CreadoPorWorker.Person != null ? g.CreadoPorWorker.Person.FullName : null,
@@ -1286,10 +1308,13 @@ public class AtsRepository : IAtsRepository
                     AutorizaFirmados = firmadas.Count(a => a.Autoriza),
                     SsomaFirmados = firmadas.Count(a => a.Ssoma),
                     Id = f.Id,
+                    ProyectoId = f.ProyectoId,
+                    CapatazLinkToken = f.QrToken.ToString(),
                     Codigo = f.Codigo,
                     Revision = f.Revision,
                     RequierePetar = f.ReqPetar,
                     TotalPetares = f.NPetares,
+                    PetaresPendientesFirma = f.NPetaresPend,
                     ObservacionesAbiertas = f.ObsAbiertas,
                     ProyectoNombre = f.ProyectoNombre,
                     Actividad = f.Actividad,

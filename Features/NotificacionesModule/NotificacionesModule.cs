@@ -14,6 +14,7 @@ namespace Abril_Backend.Features.NotificacionesModule
         public static IServiceCollection AddNotificacionesModule(this IServiceCollection services)
         {
             services.AddScoped<INotificacionesService, NotificacionesService>();
+            services.AddScoped<Abril_Backend.Shared.Services.Push.IPushService, Abril_Backend.Shared.Services.Push.PushService>();
             return services;
         }
     }
