@@ -241,7 +241,7 @@ public class IndicadoresProactivosRepository : IIndicadoresProactivosRepository
 
         // OPT/ATS/Charlas del mes completo, con fecha, para resolver empresa por evento.
         var optMesRaw = await ctx.SsomaOpt
-            .Where(o => o.ProyectoId == proyectoId && o.Fecha >= fechaIni && o.Fecha < fechaCorte)
+            .Where(o => o.Estado != "borrador" && o.ProyectoId == proyectoId && o.Fecha >= fechaIni && o.Fecha < fechaCorte)
             .SelectMany(o => o.Trabajadores.Select(t => new { o.Fecha, t.TrabajadorId, t.OptId }))
             .ToListAsync();
         // Se guarda también AuditorWorkerId: una auditoría ATS cuenta para la empresa tanto si
@@ -295,7 +295,7 @@ public class IndicadoresProactivosRepository : IIndicadoresProactivosRepository
         // del módulo de Charlas de staff): para contratistas, "Capacitaciones" mide cuántas de
         // las evidencias exigidas por sus días tareados efectivamente subieron.
         var charlaContratistaMesRaw = await ctx.SsCharlaContratista
-            .Where(c => c.State && c.ProyectoId == proyectoId
+            .Where(c => c.State && c.Estado != "Rechazado" && c.ProyectoId == proyectoId
                      && c.Fecha >= fechaIniOnly && c.Fecha < fechaCorteOnly)
             .Select(c => new { c.EmpresaId, c.Fecha })
             .ToListAsync();
@@ -513,7 +513,7 @@ public class IndicadoresProactivosRepository : IIndicadoresProactivosRepository
 
         // 4. OPT por proyecto: contar OPTs distintos para casa y contratistas
         var optBulk = await ctx.SsomaOpt
-            .Where(o => proyIds.Contains(o.ProyectoId) && o.Fecha >= fechaIni && o.Fecha < fechaCorte)
+            .Where(o => o.Estado != "borrador" && proyIds.Contains(o.ProyectoId) && o.Fecha >= fechaIni && o.Fecha < fechaCorte)
             .SelectMany(o => o.Trabajadores.Select(t => new { o.ProyectoId, o.Fecha, t.TrabajadorId, t.OptId }))
             .ToListAsync();
 
@@ -541,7 +541,7 @@ public class IndicadoresProactivosRepository : IIndicadoresProactivosRepository
         // contratistas, "Capacitaciones" mide cuántas evidencias exigidas por sus días
         // tareados efectivamente subieron, no asistencia del módulo de Charlas de staff.
         var charlaContratistaBulk = await ctx.SsCharlaContratista
-            .Where(c => c.State && proyIds.Contains(c.ProyectoId)
+            .Where(c => c.State && c.Estado != "Rechazado" && proyIds.Contains(c.ProyectoId)
                      && c.Fecha >= iniOnly && c.Fecha < corteOnly)
             .Select(c => new { c.ProyectoId, c.EmpresaId, c.Fecha })
             .ToListAsync();
@@ -786,7 +786,7 @@ public class IndicadoresProactivosRepository : IIndicadoresProactivosRepository
 
         // % cierre accidentes — solo los ocurridos dentro del mes consultado
         var accidentesTotales = await ctx.SsomaAccidenteIncidente
-            .CountAsync(a => a.ProyectoId == proyectoId && a.Fecha >= fechaIni && a.Fecha < fechaCorte);
+            .CountAsync(a => a.Estado != "Borrador" && a.ProyectoId == proyectoId && a.Fecha >= fechaIni && a.Fecha < fechaCorte);
         var accidentesCerrados = await ctx.SsomaAccidenteIncidente
             .CountAsync(a => a.ProyectoId == proyectoId && a.Fecha >= fechaIni && a.Fecha < fechaCorte && a.Estado == "Cerrado");
         var accidentesAbiertos = accidentesTotales - accidentesCerrados;
@@ -900,7 +900,7 @@ public class IndicadoresProactivosRepository : IIndicadoresProactivosRepository
 
         // Bulk: accidentes por proyecto — solo los ocurridos dentro del mes consultado
         var accBulk = await ctx.SsomaAccidenteIncidente
-            .Where(a => proyIds.Contains(a.ProyectoId) && a.Fecha >= fechaIni && a.Fecha < fechaCorte)
+            .Where(a => a.Estado != "Borrador" && proyIds.Contains(a.ProyectoId) && a.Fecha >= fechaIni && a.Fecha < fechaCorte)
             .GroupBy(a => new { a.ProyectoId, Cerrado = a.Estado == "Cerrado" })
             .Select(g => new { g.Key.ProyectoId, g.Key.Cerrado, Count = g.Count() })
             .ToListAsync();

@@ -247,7 +247,7 @@ public class DesempenoSupervisorRepository(IDbContextFactory<AppDbContext> facto
             .ToList();
 
         var optRaw = await ctx.SsomaOpt
-            .Where(o => o.Fecha >= inicio && o.Fecha < fin
+            .Where(o => o.Estado != "borrador" && o.Fecha >= inicio && o.Fecha < fin
                      && (
                          (o.ObservadorId != null && supWorkerIds.Contains(o.ObservadorId.Value)) ||
                          (o.CreatedBy != null && supervisorUserIds.Contains(o.CreatedBy.Value)) ||
@@ -474,7 +474,7 @@ public class DesempenoSupervisorRepository(IDbContextFactory<AppDbContext> facto
             .ToDictionary(g => g.Key, g => g.Count());
 
         var optAntRaw = await ctx.SsomaOpt
-            .Where(o => o.Fecha >= inicioAnt && o.Fecha < finAnt
+            .Where(o => o.Estado != "borrador" && o.Fecha >= inicioAnt && o.Fecha < finAnt
                      && (
                          (o.ObservadorId != null && supWorkerIds.Contains(o.ObservadorId.Value)) ||
                          (o.CreatedBy != null && supervisorUserIds.Contains(o.CreatedBy.Value)) ||

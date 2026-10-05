@@ -103,6 +103,8 @@ public class OptService : IOptService
         return optId;
     }
 
+    public Task EliminarBorradorAsync(int id) => _repo.EliminarBorradorAsync(id);
+
     public Task<OptDashboardDto> GetDashboardAsync(int? proyectoId, int? anio, int? empresaIdContratista = null)
         => _repo.GetDashboardAsync(proyectoId, anio, empresaIdContratista);
 

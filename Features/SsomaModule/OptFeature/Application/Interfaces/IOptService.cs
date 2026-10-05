@@ -11,6 +11,7 @@ public interface IOptService
     Task<OptDetalleDto> GetDetalleAsync(int id);
     Task<int> CrearOptAsync(CrearOptRequest request, int userId = 0);
     Task ActualizarOptAsync(int id, CrearOptRequest request, int userId = 0);
+    Task EliminarBorradorAsync(int id);
     Task<OptDashboardDto> GetDashboardAsync(int? proyectoId, int? anio, int? empresaIdContratista = null);
     Task<List<OptPetDto>> GetPetsAsync();
     Task<List<OptCriterioVerificacionDto>> GetCriteriosVerificacionAsync();
