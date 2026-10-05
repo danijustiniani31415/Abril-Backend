@@ -16,11 +16,14 @@ public interface IPetarService
     Task<PetarListResponseDto> Listar(PetarFiltroDto filtro, int callerUserId, int workerId, bool esAdmin);
 
     Task Firmar(int id, int workerId, PetarFirmarRequestDto body, string? ipOrigen, string? userAgent);
+    Task FirmarCapataz(int id, int callerUserId, bool esAdmin, PetarFirmarVistoRequestDto body);
     Task FirmarSupervisor(int id, int callerUserId, bool esAdmin, PetarFirmarVistoRequestDto body);
     Task FirmarVistoSsoma(int id, int callerUserId, bool esAdmin, PetarFirmarVistoRequestDto body);
     Task Cerrar(int id, int workerId, PetarCerrarRequestDto body);
 
     Task<byte[]> GenerarPdf(int id);
+    Task<byte[]> GenerarPdfGrupo(int petarGrupoId);
+    Task<PetarVerificacionPublicaDto> VerificarPublicoGrupo(int petarGrupoId, string? hash);
     Task<PetarVerificacionPublicaDto> VerificarPublico(int id, string? hash);
 
     // ── PETAR Grupal ──────────────────────────────────────────────────────
@@ -29,6 +32,10 @@ public interface IPetarService
     Task<List<PetarGrupoEstadoDto>> GetEstadosPorAtsGrupo(int atsGrupoId, int callerUserId, int workerId, bool esAdmin);
     Task<PetarGrupoEstadoDto> GetEstadoGrupo(int id, int callerUserId, int workerId, bool esAdmin);
     Task CerrarGrupo(int id, int workerId, bool esAdmin);
+    Task FirmarCapatazGrupo(int id, int callerUserId, bool esAdmin, PetarFirmarVistoRequestDto body);
+    Task<List<PetarGrupoCapatazPublicoDto>> GetCapatazPublicoPetares(Guid atsToken);
+    Task<PetarGrupoCrearResponseDto> CrearGrupoPublico(Guid atsToken, PetarGrupoCrearPublicoDto body);
+    Task FirmarCapatazGrupoPublico(int petarGrupoId, PetarGrupoCapatazFirmarPublicoDto body);
     Task FirmarSupervisorGrupo(int id, int callerUserId, bool esAdmin, PetarFirmarVistoRequestDto body);
     Task FirmarSsomaGrupo(int id, int callerUserId, bool esAdmin, PetarFirmarVistoRequestDto body);
     Task<int> UnirseAGrupo(int petarGrupoId, PetarGrupoUnirseRequestDto body, string? ipOrigen, string? userAgent);

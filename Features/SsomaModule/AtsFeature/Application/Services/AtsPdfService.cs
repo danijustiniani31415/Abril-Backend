@@ -21,7 +21,7 @@ public static class AtsPdfService
     public static byte[] Generar(
         AtsResponseDto ats, byte[]? selfieBytes, byte[]? firmaBytes, string verificacionUrl,
         byte[]? firmaAutorizaBytes = null, byte[]? firmaSsomaBytes = null, byte[]? logoBytes = null,
-        byte[]? firmaCapatazBytes = null)
+        byte[]? firmaCapatazBytes = null, string? petarCodigos = null)
     {
         byte[]? qrBytes = null;
         using (var generator = new QRCodeGenerator())
@@ -39,7 +39,7 @@ public static class AtsPdfService
                 page.Margin(30);
                 page.DefaultTextStyle(t => t.FontFamily("Arial").FontSize(9));
 
-                page.Header().Element(c => ComposeHeader(c, logoBytes, ats.PlantillaNombre, ats.Codigo));
+                page.Header().Element(c => ComposeHeader(c, logoBytes, ats.PlantillaNombre, ats.Codigo, petarCodigos));
 
                 page.Content().Column(col =>
                 {
@@ -163,7 +163,7 @@ public static class AtsPdfService
     /// Visto Bueno SSOMA. Mismo formato SSO-FO-018 que el ATS individual.</summary>
     public static byte[] GenerarGrupal(
         AtsResponseDto contenido, string numeroDocumento, List<GrupalFila> filas, bool requiereCapataz,
-        FirmaCadena capataz, FirmaCadena autoriza, FirmaCadena ssoma, byte[]? logoBytes)
+        FirmaCadena capataz, FirmaCadena autoriza, FirmaCadena ssoma, byte[]? logoBytes, string? petarCodigos = null)
     {
         return Document.Create(container =>
         {
@@ -173,7 +173,7 @@ public static class AtsPdfService
                 page.Margin(30);
                 page.DefaultTextStyle(t => t.FontFamily("Arial").FontSize(9));
 
-                page.Header().Element(c => ComposeHeader(c, logoBytes, contenido.PlantillaNombre, numeroDocumento));
+                page.Header().Element(c => ComposeHeader(c, logoBytes, contenido.PlantillaNombre, numeroDocumento, petarCodigos));
 
                 page.Content().Column(col =>
                 {
@@ -296,7 +296,7 @@ public static class AtsPdfService
 
     /// <summary>Logo | título centrado | Código/Versión/Fecha + Elab./Rev./Apro. — mismo patrón
     /// que ConvalidacionPdfService/RacPdfService, el estándar corporativo de formatos SSOMA.</summary>
-    private static void ComposeHeader(IContainer container, byte[]? logoBytes, string? plantillaNombre, string? numeroDocumento)
+    private static void ComposeHeader(IContainer container, byte[]? logoBytes, string? plantillaNombre, string? numeroDocumento, string? petarCodigos = null)
     {
         container.Border(0.5f).BorderColor(Colors.Grey.Lighten1).Row(row =>
         {
@@ -317,6 +317,8 @@ public static class AtsPdfService
                     tCol.Item().AlignCenter().Text(plantillaNombre).FontSize(8).FontColor(Colors.Grey.Darken2);
                 if (!string.IsNullOrWhiteSpace(numeroDocumento))
                     tCol.Item().AlignCenter().Text($"N.° {numeroDocumento}").Bold().FontSize(9);
+                if (!string.IsNullOrWhiteSpace(petarCodigos))
+                    tCol.Item().AlignCenter().Text($"PETAR vinculado: {petarCodigos}").Bold().FontSize(8);
             });
 
             row.ConstantItem(0.5f).Background(Colors.Grey.Lighten1);

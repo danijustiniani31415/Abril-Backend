@@ -6,13 +6,149 @@ using QuestPDF.Infrastructure;
 
 namespace Abril_Backend.Features.SsomaModule.PetarFeature.Application.Services;
 
+public record PetarGrupalFila(string Nombre, DateTime? Hora, decimal? Lat, decimal? Lng, byte[]? Selfie, byte[]? Firma);
+
+public record PetarGrupalFirma(string? Nombre, string? Cargo, DateTime? Hora, byte[]? Firma);
+
+public record PetarGrupalDatos(
+    string? TipoCodigo, string? TipoNombre, string Numero, string? AtsCodigo, string? ProyectoNombre,
+    string Descripcion, string? Lugar, DateOnly Fecha, TimeOnly? HoraInicio, TimeOnly? HoraFin,
+    List<(string Texto, string Respuesta)> Checklist);
+
 /// <summary>Genera el PDF del PETAR — checklist de verificación + las 3 firmas (Ejecutante,
 /// Supervisor, SSOMA) + QR de verificación, mismo patrón que AtsPdfService.</summary>
 public static class PetarPdfService
 {
+    /// <summary>PETAR GRUPAL: un solo documento por cuadrilla — mismo formato/cabecera que el individual, con la
+    /// firma (selfie/hora/GPS) de CADA trabajador y una única firma de Supervisor y de Visto Bueno SSOMA.</summary>
+    public static byte[] GenerarGrupal(PetarGrupalDatos d, List<PetarGrupalFila> filas, PetarGrupalFirma? capataz, PetarGrupalFirma supervisor, PetarGrupalFirma ssoma, byte[]? logoBytes, string verificacionUrl, string hashCorto)
+    {
+        byte[] qrBytes;
+        using (var generator = new QRCodeGenerator())
+        using (var data = generator.CreateQrCode(verificacionUrl, QRCodeGenerator.ECCLevel.M))
+            qrBytes = new PngByteQRCode(data).GetGraphic(8);
+
+        return Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Size(PageSizes.A4);
+                page.Margin(30);
+                page.DefaultTextStyle(t => t.FontFamily("Arial").FontSize(9));
+
+                page.Header().Element(c => ComposeHeader(c, logoBytes, d.TipoCodigo, d.TipoNombre, d.Numero, d.AtsCodigo));
+
+                page.Content().Column(col =>
+                {
+                    col.Spacing(8);
+
+                    col.Item().PaddingTop(10).Column(c =>
+                    {
+                        c.Item().Text($"Proyecto: {d.ProyectoNombre}").Bold();
+                        c.Item().Text($"Trabajo a realizar: {d.Descripcion}");
+                        if (!string.IsNullOrWhiteSpace(d.Lugar))
+                            c.Item().Text($"Lugar: {d.Lugar}");
+                        c.Item().Text($"Fecha: {d.Fecha:dd/MM/yyyy}" + (d.HoraInicio != null ? $"   Horario: {d.HoraInicio} - {d.HoraFin}" : ""));
+                        c.Item().Text($"Trabajadores de la cuadrilla: {filas.Count}");
+                    });
+
+                    col.Item().PaddingTop(6).Text("Checklist de verificación previa").Bold();
+                    col.Item().Table(table =>
+                    {
+                        table.ColumnsDefinition(c => { c.RelativeColumn(5); c.ConstantColumn(50); });
+                        table.Header(h =>
+                        {
+                            h.Cell().Background(Colors.Grey.Lighten3).Padding(4).Text("Ítem").Bold();
+                            h.Cell().Background(Colors.Grey.Lighten3).Padding(4).Text("Resp.").Bold();
+                        });
+                        foreach (var (texto, respuesta) in d.Checklist)
+                        {
+                            table.Cell().BorderBottom(0.5f).BorderColor(Colors.Grey.Lighten2).Padding(4).Text(texto).FontSize(8);
+                            table.Cell().BorderBottom(0.5f).BorderColor(Colors.Grey.Lighten2).Padding(4).AlignCenter()
+                                .Text(respuesta).FontSize(8).Bold()
+                                .FontColor(respuesta == "NO" ? Colors.Red.Darken2 : Colors.Green.Darken2);
+                        }
+                    });
+
+                    col.Item().PaddingTop(10).Text($"Trabajadores que firman ({filas.Count(f => f.Firma is { Length: > 0 })} de {filas.Count})").Bold();
+                    col.Item().Table(table =>
+                    {
+                        table.ColumnsDefinition(c =>
+                        {
+                            c.ConstantColumn(22);
+                            c.RelativeColumn(3);
+                            c.RelativeColumn(2);
+                            c.ConstantColumn(40);
+                            c.RelativeColumn(2);
+                        });
+                        table.Header(h =>
+                        {
+                            h.Cell().Background(Colors.Grey.Lighten3).Padding(4).Text("N°").Bold().FontSize(8);
+                            h.Cell().Background(Colors.Grey.Lighten3).Padding(4).Text("Trabajador").Bold().FontSize(8);
+                            h.Cell().Background(Colors.Grey.Lighten3).Padding(4).Text("Firmado (hora / GPS)").Bold().FontSize(8);
+                            h.Cell().Background(Colors.Grey.Lighten3).Padding(4).Text("Selfie").Bold().FontSize(8);
+                            h.Cell().Background(Colors.Grey.Lighten3).Padding(4).Text("Firma").Bold().FontSize(8);
+                        });
+
+                        var n = 0;
+                        foreach (var f in filas)
+                        {
+                            n++;
+                            table.Cell().BorderBottom(0.5f).BorderColor(Colors.Grey.Lighten2).Padding(3).AlignMiddle().Text(n.ToString()).FontSize(8);
+                            table.Cell().BorderBottom(0.5f).BorderColor(Colors.Grey.Lighten2).Padding(3).AlignMiddle().Text(f.Nombre).FontSize(8).Bold();
+                            table.Cell().BorderBottom(0.5f).BorderColor(Colors.Grey.Lighten2).Padding(3).AlignMiddle().Column(c =>
+                            {
+                                c.Item().Text(FechaHoraPeru(f.Hora)).FontSize(7.5f);
+                                if (f.Lat.HasValue && f.Lng.HasValue)
+                                    c.Item().Text($"{f.Lat:0.00000}, {f.Lng:0.00000}").FontSize(6.5f).FontColor(Colors.Grey.Darken1);
+                            });
+                            table.Cell().BorderBottom(0.5f).BorderColor(Colors.Grey.Lighten2).Padding(2).Height(36).Element(inner =>
+                            {
+                                if (f.Selfie is { Length: > 0 }) inner.Image(f.Selfie).FitArea();
+                            });
+                            table.Cell().BorderBottom(0.5f).BorderColor(Colors.Grey.Lighten2).Padding(2).Height(36).Element(inner =>
+                            {
+                                if (f.Firma is { Length: > 0 })
+                                    inner.Image(f.Firma).FitArea();
+                                else
+                                    inner.AlignMiddle().AlignCenter().Text("PENDIENTE").FontSize(8).Bold().FontColor(Colors.Red.Darken2);
+                            });
+                        }
+                    });
+
+                    col.Item().PaddingTop(14).Text("Firmas de validación (una por cuadrilla)").Bold();
+                    col.Item().ShowEntire().Row(row =>
+                    {
+                        if (capataz != null)
+                            row.RelativeItem().Element(c => FirmaBloque(c, "Capataz / Maestro de Obra", capataz.Nombre, capataz.Cargo, capataz.Hora, capataz.Firma));
+                        row.RelativeItem().Element(c => FirmaBloque(c, "Supervisor (Residente / Producción)", supervisor.Nombre, supervisor.Cargo, supervisor.Hora, supervisor.Firma));
+                        row.RelativeItem().Element(c => FirmaBloque(c, "Visto Bueno SSOMA", ssoma.Nombre, ssoma.Cargo, ssoma.Hora, ssoma.Firma));
+                    });
+
+                    col.Item().PaddingTop(10).ShowEntire().Row(row =>
+                    {
+                        row.RelativeItem().Column(c =>
+                        {
+                            c.Item().Text($"Documento: {d.Numero}" + (string.IsNullOrWhiteSpace(d.AtsCodigo) ? "" : $"  ·  ATS vinculado: {d.AtsCodigo}")).FontSize(8).Bold();
+                            c.Item().Text($"Código de verificación: {hashCorto}").FontSize(7).FontColor(Colors.Grey.Darken1);
+                        });
+                        row.ConstantItem(70).Height(70).Image(qrBytes).FitArea();
+                    });
+                });
+
+                page.Footer().AlignCenter().Text(t =>
+                {
+                    t.Span("Verificar autenticidad: ").FontSize(7);
+                    t.Span(verificacionUrl).FontSize(7).FontColor(Colors.Blue.Darken2);
+                });
+            });
+        }).GeneratePdf();
+    }
+
     public static byte[] Generar(
         PetarResponseDto p, byte[]? selfieBytes, byte[]? firmaBytes, string verificacionUrl,
-        byte[]? firmaSupervisorBytes = null, byte[]? firmaSsomaBytes = null, byte[]? logoBytes = null)
+        byte[]? firmaSupervisorBytes = null, byte[]? firmaSsomaBytes = null, byte[]? logoBytes = null,
+        byte[]? firmaCapatazBytes = null)
     {
         byte[]? qrBytes = null;
         using (var generator = new QRCodeGenerator())
@@ -109,7 +245,9 @@ public static class PetarPdfService
                     col.Item().Row(row =>
                     {
                         row.RelativeItem().Element(c => FirmaBloque(c, "Ejecutante", p.WorkerNombre, null, p.HoraServidorFirma, firmaBytes));
-                        row.RelativeItem().Element(c => FirmaBloque(c, "Supervisor / Responsable", p.SupervisorNombre, p.SupervisorCargo, p.SupervisorHoraServidor, firmaSupervisorBytes));
+                        if (p.RequiereCapataz)
+                            row.RelativeItem().Element(c => FirmaBloque(c, "Capataz / Maestro de Obra", p.CapatazNombre, p.CapatazCargo, p.CapatazHoraServidor, firmaCapatazBytes));
+                        row.RelativeItem().Element(c => FirmaBloque(c, "Supervisor (Residente / Producción)", p.SupervisorNombre, p.SupervisorCargo, p.SupervisorHoraServidor, firmaSupervisorBytes));
                         row.RelativeItem().Element(c => FirmaBloque(c, "Visto Bueno SSOMA", p.SsomaNombre, p.SsomaCargo, p.SsomaHoraServidor, firmaSsomaBytes));
                     });
                 });

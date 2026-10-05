@@ -68,6 +68,14 @@ public class SsPetar
     public string? IpOrigen { get; set; }
     public string? UserAgent { get; set; }
 
+    // ── Capataz / Maestro de obra (primer nivel de validación; solo cuando el ejecutante es obrero) ──
+    public int? CapatazWorkerId { get; set; }
+    public string? CapatazNombre { get; set; }
+    public string? CapatazCargo { get; set; }
+    public string? CapatazFirmaUrl { get; set; }
+    public string? CapatazFirmaHash { get; set; }
+    public DateTime? CapatazHoraServidor { get; set; }
+
     // ── Supervisor / Responsable del trabajo (obligatorio para pasar a Firmado) ──
     public int? SupervisorWorkerId { get; set; }
     public string? SupervisorNombre { get; set; }
@@ -131,6 +139,8 @@ public class SsPetarGrupo
 {
     public int Id { get; set; }
     public int AtsGrupoId { get; set; }
+    /// <summary>Código por proyecto, igual que el del ATS grupal: "{ABREV}-PETG-0001". Se imprime junto al del ATS vinculado.</summary>
+    public string? Codigo { get; set; }
     public int TipoId { get; set; }
     public int ProyectoId { get; set; }
     public int CreadoPorWorkerId { get; set; }
@@ -144,6 +154,21 @@ public class SsPetarGrupo
     /// <summary>"Activo" acepta adhesiones nuevas; "Cerrado" deja de aceptarlas — los PETAR ya
     /// adheridos no se ven afectados.</summary>
     public string Estado { get; set; } = "Activo";
+
+    // ── Capataz / Maestro de obra (primer nivel de validación; solo cuando el ejecutante es obrero) ──
+    public int? CapatazWorkerId { get; set; }
+    public string? CapatazNombre { get; set; }
+    public string? CapatazCargo { get; set; }
+    public string? CapatazFirmaUrl { get; set; }
+    public string? CapatazFirmaHash { get; set; }
+    public DateTime? CapatazHoraServidor { get; set; }
+    /// <summary>Evidencia de presencia del Capataz cuando firma por el link público (no tiene cuenta): selfie + geo.</summary>
+    public string? CapatazSelfieUrl { get; set; }
+    public string? CapatazSelfieHash { get; set; }
+    public decimal? CapatazLat { get; set; }
+    public decimal? CapatazLng { get; set; }
+    public decimal? CapatazPrecisionMetros { get; set; }
+    public DateTime? CapatazHoraDispositivo { get; set; }
 
     public int? SupervisorWorkerId { get; set; }
     public string? SupervisorNombre { get; set; }

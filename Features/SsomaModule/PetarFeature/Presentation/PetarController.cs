@@ -121,6 +121,18 @@ namespace Abril_Backend.Features.SsomaModule.PetarFeature.Presentation
             catch (Exception ex) { _logger.LogError(ex, "Error en PetarController.Firmar"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
         }
 
+        [HttpPost("{id:int}/firmar-capataz")]
+        public async Task<IActionResult> FirmarCapataz(int id, [FromBody] PetarFirmarVistoRequestDto body)
+        {
+            try
+            {
+                await _service.FirmarCapataz(id, CurrentUserId(), EsAdmin(), body);
+                return Ok(new { message = "Firmado como Capataz/Maestro de obra." });
+            }
+            catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
+            catch (Exception ex) { _logger.LogError(ex, "Error en PetarController.FirmarCapataz"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
+        }
+
         [HttpPost("{id:int}/firmar-supervisor")]
         public async Task<IActionResult> FirmarSupervisor(int id, [FromBody] PetarFirmarVistoRequestDto body)
         {
@@ -218,6 +230,26 @@ namespace Abril_Backend.Features.SsomaModule.PetarFeature.Presentation
             catch (Exception ex) { _logger.LogError(ex, "Error en PetarController.GetEstadoGrupo"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
         }
 
+        [HttpGet("grupo/{id:int}/verificar-publico")]
+        [AllowAnonymous]
+        public async Task<IActionResult> VerificarPublicoGrupo(int id, [FromQuery] string? hash)
+        {
+            try { return Ok(await _service.VerificarPublicoGrupo(id, hash)); }
+            catch (Exception ex) { _logger.LogError(ex, "Error en PetarController.VerificarPublicoGrupo"); return StatusCode(500, new { message = "Error del servidor." }); }
+        }
+
+        [HttpGet("grupo/{id:int}/pdf")]
+        public async Task<IActionResult> GetPdfGrupo(int id)
+        {
+            try
+            {
+                var bytes = await _service.GenerarPdfGrupo(id);
+                return File(bytes, "application/pdf", $"PETAR-GRUPAL-{id}.pdf");
+            }
+            catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
+            catch (Exception ex) { _logger.LogError(ex, "Error en PetarController.GetPdfGrupo"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
+        }
+
         [HttpPost("grupo/{id:int}/cerrar")]
         public async Task<IActionResult> CerrarGrupo(int id)
         {
@@ -229,6 +261,59 @@ namespace Abril_Backend.Features.SsomaModule.PetarFeature.Presentation
             }
             catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
             catch (Exception ex) { _logger.LogError(ex, "Error en PetarController.CerrarGrupo"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
+        }
+
+        /// <summary>Catálogo de tipos de PETAR con su checklist, para el formulario público (QR) de generar PETAR.</summary>
+        [HttpGet("grupo/publico/{atsToken:guid}/tipos")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetTiposPublico(Guid atsToken)
+        {
+            try { return Ok(await _service.GetTiposCatalogo()); }
+            catch (Exception ex) { _logger.LogError(ex, "Error en PetarController.GetTiposPublico"); return StatusCode(500, new { message = "Error del servidor." }); }
+        }
+
+        /// <summary>Generar el PETAR de la cuadrilla desde el QR, sin cuenta (autor o Capataz, con nombre + DNI).</summary>
+        [HttpPost("grupo/publico/{atsToken:guid}/crear")]
+        [AllowAnonymous]
+        public async Task<IActionResult> CrearGrupoPublico(Guid atsToken, [FromBody] PetarGrupoCrearPublicoDto body)
+        {
+            try { return Ok(await _service.CrearGrupoPublico(atsToken, body)); }
+            catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
+            catch (Exception ex) { _logger.LogError(ex, "Error en PetarController.CrearGrupoPublico"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
+        }
+
+        /// <summary>Página pública del Capataz (la del ATS grupal): PETAR de la cuadrilla que esperan su firma.</summary>
+        [HttpGet("grupo/publico/{atsToken:guid}/capataz")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetCapatazPublicoPetares(Guid atsToken)
+        {
+            try { return Ok(await _service.GetCapatazPublicoPetares(atsToken)); }
+            catch (Exception ex) { _logger.LogError(ex, "Error en PetarController.GetCapatazPublicoPetares"); return StatusCode(500, new { message = "Error del servidor." }); }
+        }
+
+        [HttpPost("grupo/{id:int}/capataz-publico/firmar")]
+        [AllowAnonymous]
+        public async Task<IActionResult> FirmarCapatazGrupoPublico(int id, [FromBody] PetarGrupoCapatazFirmarPublicoDto body)
+        {
+            try
+            {
+                await _service.FirmarCapatazGrupoPublico(id, body);
+                return Ok(new { message = "Firmado como Capataz/Maestro de obra." });
+            }
+            catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
+            catch (Exception ex) { _logger.LogError(ex, "Error en PetarController.FirmarCapatazGrupoPublico"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
+        }
+
+        [HttpPost("grupo/{id:int}/firmar-capataz")]
+        public async Task<IActionResult> FirmarCapatazGrupo(int id, [FromBody] PetarFirmarVistoRequestDto body)
+        {
+            try
+            {
+                await _service.FirmarCapatazGrupo(id, CurrentUserId(), EsAdmin(), body);
+                return Ok(new { message = "Firmado como Capataz/Maestro de obra para todo el grupo." });
+            }
+            catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
+            catch (Exception ex) { _logger.LogError(ex, "Error en PetarController.FirmarCapatazGrupo"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
         }
 
         [HttpPost("grupo/{id:int}/firmar-supervisor")]

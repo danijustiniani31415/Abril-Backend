@@ -900,6 +900,20 @@ namespace Abril_Backend.Features.SsomaModule.AtsFeature.Presentation
             catch (Exception ex) { _logger.LogError(ex, "Error en AtsController.CerrarGrupo"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
         }
 
+        /// <summary>El autor sin cuenta (creó la cuadrilla desde el QR de obra) la cierra con su nombre + DNI.</summary>
+        [HttpPost("grupo/publico/{token:guid}/cerrar")]
+        [AllowAnonymous]
+        public async Task<IActionResult> CerrarGrupoPublico(Guid token, [FromBody] AtsGrupoCerrarPublicoRequestDto body)
+        {
+            try
+            {
+                await _service.CerrarGrupoPublico(token, body);
+                return Ok(new { message = "ATS grupal cerrado." });
+            }
+            catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
+            catch (Exception ex) { _logger.LogError(ex, "Error en AtsController.CerrarGrupoPublico"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
+        }
+
         // ── Página pública de adhesión (QR) — SIN login, el token es el único candado ──────
 
         [HttpGet("grupo/publico/{token:guid}/resumen")]

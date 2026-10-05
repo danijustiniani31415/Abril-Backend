@@ -82,6 +82,7 @@ public interface IAtsService
     Task<AtsGrupoCrearResponseDto> CrearGrupo(int workerId, AtsGuardarRequestDto dto, bool esAdmin = false);
     Task<AtsGrupoEstadoDto> GetEstadoGrupo(int id, int workerId, bool esAdmin);
     Task CerrarGrupo(int id, int workerId, bool esAdmin);
+    Task CerrarGrupoPublico(Guid token, AtsGrupoCerrarPublicoRequestDto body);
     Task<AtsGrupoResumenPublicoDto> GetResumenPublico(Guid token);
     Task<List<AtsGrupoWorkerOpcionDto>> GetWorkersParaAdhesion(Guid token);
     Task<int> UnirseAGrupo(Guid token, AtsGrupoUnirseRequestDto body, string? ipOrigen, string? userAgent);

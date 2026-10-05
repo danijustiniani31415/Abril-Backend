@@ -675,7 +675,7 @@ public class AtsRepository : IAtsRepository
         }).ToList(),
     };
 
-    public async Task CompletarInfoPetar(List<AtsResponseDto> ats, Dictionary<int, (bool EsResidente, bool EsSsoma)> permisosPorAtsId)
+    public async Task CompletarInfoPetar(List<AtsResponseDto> ats, Dictionary<int, (bool EsResidente, bool EsSsoma, bool EsCapataz)> permisosPorAtsId)
     {
         if (ats.Count == 0) return;
         using var ctx = _factory.CreateDbContext();
@@ -703,7 +703,7 @@ public class AtsRepository : IAtsRepository
         foreach (var dto in ats)
         {
             dto.RequierePetar = atsIdsConRiesgoPetar.Contains(dto.Id);
-            var (esResidente, esSsoma) = permisosPorAtsId.GetValueOrDefault(dto.Id);
+            var (esResidente, esSsoma, esCapataz) = permisosPorAtsId.GetValueOrDefault(dto.Id);
             dto.Petares = petaresPorAts[dto.Id]
                 .Select(p =>
                 {
@@ -711,6 +711,7 @@ public class AtsRepository : IAtsRepository
                     // SSOMA firman UNA vez para todo el grupo, desde el dashboard del ATS grupal
                     // (ver PetarGrupo). Acá solo se refleja si ya quedó autorizado, nunca se
                     // habilita el botón de firmar individual (evita firmar 20 veces lo mismo).
+                    var capatazFirmaUrl = p.PetarGrupoId.HasValue ? p.PetarGrupo?.CapatazFirmaUrl : p.CapatazFirmaUrl;
                     var supervisorFirmaUrl = p.PetarGrupoId.HasValue ? p.PetarGrupo?.SupervisorFirmaUrl : p.SupervisorFirmaUrl;
                     var ssomaFirmaUrl = p.PetarGrupoId.HasValue ? p.PetarGrupo?.SsomaFirmaUrl : p.SsomaFirmaUrl;
                     return new AtsPetarResumenDto
@@ -720,10 +721,12 @@ public class AtsRepository : IAtsRepository
                         TipoNombre = p.Tipo?.Nombre,
                         Estado = p.Estado,
                         TieneFirmaEjecutante = p.FirmaUrl != null,
+                        CapatazFirmado = capatazFirmaUrl != null,
+                        PuedeFirmarCapataz = !p.PetarGrupoId.HasValue && esCapataz && dto.RequiereCapataz && p.FirmaUrl != null && p.CapatazFirmaUrl == null && p.Estado == "Borrador",
                         SupervisorFirmado = supervisorFirmaUrl != null,
                         SsomaFirmado = ssomaFirmaUrl != null,
-                        PuedeFirmarSupervisor = !p.PetarGrupoId.HasValue && esResidente && p.FirmaUrl != null && p.SupervisorFirmaUrl == null && p.Estado == "Borrador",
-                        PuedeFirmarSsoma = !p.PetarGrupoId.HasValue && esSsoma && p.FirmaUrl != null && p.SsomaFirmaUrl == null && p.Estado == "Borrador",
+                        PuedeFirmarSupervisor = !p.PetarGrupoId.HasValue && esResidente && p.FirmaUrl != null && p.SupervisorFirmaUrl == null && p.Estado == "Borrador" && (!dto.RequiereCapataz || p.CapatazFirmaUrl != null),
+                        PuedeFirmarSsoma = !p.PetarGrupoId.HasValue && esSsoma && p.FirmaUrl != null && p.SupervisorFirmaUrl != null && p.SsomaFirmaUrl == null && p.Estado == "Borrador",
                     };
                 })
                 .ToList();
@@ -1025,6 +1028,102 @@ public class AtsRepository : IAtsRepository
             ResidenteEmail = residente?.EmailCorporativo,
             SsomaEmails = ssomaEmails.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
         };
+    }
+
+    /// <summary>Correos de quienes firman un nivel de la cadena en ese proyecto, para avisarles (campanita + push):
+    /// "Capataz" = Capataz/Maestro de obra (su correo personal de cuenta propia, o el corporativo);
+    /// "Autoriza" = Residente + Ing./Arq. de Producción; "Ssoma" = Coordinador(es) SSOMA.</summary>
+    public async Task<List<string>> GetEmailsNivel(int proyectoId, string nivel)
+    {
+        var responsables = await GetResponsables(proyectoId);
+        if (nivel == "Ssoma") return responsables.SsomaEmails;
+
+        using var ctx = _factory.CreateDbContext();
+        var emails = new List<string>();
+
+        if (nivel == "Autoriza" && !string.IsNullOrWhiteSpace(responsables.ResidenteEmail))
+            emails.Add(responsables.ResidenteEmail);
+
+        var vinculaciones = await ctx.WorkerVinculacion
+            .Include(v => v.PuestoCatalogo)
+            .Where(v => v.ProyectoId == proyectoId && v.FechaFin == null && v.PuestoCatalogo != null)
+            .ToListAsync();
+
+        var workerIds = vinculaciones
+            .Where(v => nivel == "Capataz"
+                ? v.PuestoCatalogo!.Nombre.Contains("Capataz", StringComparison.OrdinalIgnoreCase) || v.PuestoCatalogo.Nombre.Contains("Maestro de Obra", StringComparison.OrdinalIgnoreCase)
+                : v.PuestoCatalogo!.Nombre.Contains("Ingeniero de Producción", StringComparison.OrdinalIgnoreCase) || v.PuestoCatalogo.Nombre.Contains("Arquitecto de Producción", StringComparison.OrdinalIgnoreCase))
+            .Select(v => v.WorkerId).Distinct().ToList();
+        if (workerIds.Count == 0) return emails;
+
+        var corporativos = await ctx.Worker.Where(w => workerIds.Contains(w.Id) && w.WorkersEstadoId == Abril_Backend.Shared.Constants.WorkersEstadoIds.Activo)
+            .Select(w => new { w.Id, w.EmailCorporativo }).ToListAsync();
+        var personales = nivel == "Capataz"
+            ? await ctx.SsAtsAutorizacionPermiso.Where(a => workerIds.Contains(a.WorkerId)).ToDictionaryAsync(a => a.WorkerId, a => a.EmailPersonal)
+            : new Dictionary<int, string?>();
+
+        foreach (var w in corporativos)
+        {
+            // La cuenta del Capataz/Maestro se creó con su correo personal; si no, el corporativo.
+            var email = nivel == "Capataz" && personales.GetValueOrDefault(w.Id) is { Length: > 0 } p ? p : w.EmailCorporativo;
+            if (!string.IsNullOrWhiteSpace(email)) emails.Add(email);
+        }
+        return emails.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>Códigos de los PETAR ligados a un ATS (individual) o a todo un ATS grupal — se imprimen en el PDF del ATS.</summary>
+    public async Task<string?> GetCodigosPetar(int? atsId, int? atsGrupoId)
+    {
+        using var ctx = _factory.CreateDbContext();
+        var codigos = new List<string>();
+        if (atsGrupoId.HasValue)
+            codigos.AddRange((await ctx.SsPetarGrupo.AsNoTracking().Where(p => p.AtsGrupoId == atsGrupoId).OrderBy(p => p.Id).ToListAsync()).Select(p => p.Codigo ?? $"PETG-{p.Id:D4}"));
+        else if (atsId.HasValue)
+        {
+            var petares = await ctx.SsPetar.AsNoTracking().Where(p => p.AtsId == atsId).OrderBy(p => p.Id).Select(p => new { p.Codigo, p.PetarGrupoId }).ToListAsync();
+            codigos.AddRange(petares.Where(p => p.PetarGrupoId == null && p.Codigo != null).Select(p => p.Codigo!));
+            var grupoIds = petares.Where(p => p.PetarGrupoId != null).Select(p => p.PetarGrupoId!.Value).Distinct().ToList();
+            if (grupoIds.Count > 0)
+                codigos.AddRange((await ctx.SsPetarGrupo.AsNoTracking().Where(p => grupoIds.Contains(p.Id)).OrderBy(p => p.Id).ToListAsync()).Select(p => p.Codigo ?? $"PETG-{p.Id:D4}"));
+        }
+        return codigos.Count == 0 ? null : string.Join(", ", codigos);
+    }
+
+    /// <summary>PETAR del ATS (o de la cuadrilla) a los que todavía les faltan firmas ANTERIORES a SSOMA — ejecutante,
+    /// Capataz (si aplica) y Supervisor. SSOMA firma al final, así que mientras esta lista no esté vacía no puede dar el
+    /// Visto Bueno del ATS. Cada ítem dice qué PETAR y qué firma falta.</summary>
+    public async Task<List<string>> GetPetaresSinValidacionPrevia(int? atsId, int? atsGrupoId, bool requiereCapataz)
+    {
+        using var ctx = _factory.CreateDbContext();
+        var faltan = new List<string>();
+
+        if (atsGrupoId.HasValue)
+        {
+            var grupos = await ctx.SsPetarGrupo.AsNoTracking().Where(p => p.AtsGrupoId == atsGrupoId).OrderBy(p => p.Id).ToListAsync();
+            foreach (var g in grupos)
+            {
+                var f = new List<string>();
+                if (requiereCapataz && g.CapatazFirmaUrl == null) f.Add("Capataz");
+                if (g.SupervisorFirmaUrl == null) f.Add("Supervisor");
+                if (f.Count > 0) faltan.Add($"{g.Codigo ?? $"PETG-{g.Id:D4}"}: falta {string.Join(" y ", f)}");
+            }
+        }
+        else if (atsId.HasValue)
+        {
+            var petares = await ctx.SsPetar.AsNoTracking().Where(p => p.AtsId == atsId && p.PetarGrupoId == null).OrderBy(p => p.Id).ToListAsync();
+            foreach (var p in petares)
+            {
+                var f = new List<string>();
+                if (p.FirmaUrl == null) f.Add("firma del ejecutante");
+                else
+                {
+                    if (requiereCapataz && p.CapatazFirmaUrl == null) f.Add("Capataz");
+                    if (p.SupervisorFirmaUrl == null) f.Add("Supervisor");
+                }
+                if (f.Count > 0) faltan.Add($"{p.Codigo ?? $"PETAR-{p.Id}"}: falta {string.Join(" y ", f)}");
+            }
+        }
+        return faltan;
     }
 
     public async Task<bool> EsProduccionDeProyecto(int workerId, int proyectoId)
@@ -1959,14 +2058,67 @@ public class AtsRepository : IAtsRepository
         return await ctx.SsAts.AnyAsync(a => a.AtsGrupoId == atsGrupoId && (a.AutorizaFirmaUrl != null || a.SsomaFirmaUrl != null));
     }
 
-    public async Task ReabrirGrupo(int atsGrupoId, DateTime nuevaExpiracionUtc)
+    /// <summary>Reabre la cuadrilla e INVALIDA todas las firmas de validación (Capataz, Autoriza, SSOMA del ATS y
+    /// Supervisor/SSOMA de los PETAR): deben firmar de nuevo sobre la cuadrilla final. Devuelve un resumen de quién
+    /// había firmado, para dejarlo en el evento de auditoría. Las firmas de los trabajadores no se tocan.</summary>
+    public async Task<string?> ReabrirGrupo(int atsGrupoId, DateTime nuevaExpiracionUtc)
     {
         using var ctx = _factory.CreateDbContext();
         var g = await ctx.SsAtsGrupo.FirstOrDefaultAsync(x => x.Id == atsGrupoId) ?? throw new AbrilException("ATS grupal no encontrado.", 404);
         g.Estado = "Activo";
         g.QrExpiraEn = nuevaExpiracionUtc;
         g.UpdatedAt = DateTime.UtcNow;
+
+        var previas = new HashSet<string>();
+        void Nota(string rol, string? nombre, DateTime? hora)
+        {
+            if (nombre != null) previas.Add($"{rol}: {nombre}" + (hora.HasValue ? $" ({hora:dd/MM/yyyy HH:mm} UTC)" : ""));
+        }
+
+        Nota("Capataz", g.CapatazNombre, g.CapatazHoraServidor);
+        g.CapatazWorkerId = null; g.CapatazNombre = null; g.CapatazCargo = null; g.CapatazFirmaUrl = null; g.CapatazFirmaHash = null;
+        g.CapatazHoraServidor = null; g.CapatazAdhesionesAlFirmar = null; g.CapatazSelfieUrl = null; g.CapatazSelfieHash = null;
+        g.CapatazLat = null; g.CapatazLng = null; g.CapatazPrecisionMetros = null; g.CapatazHoraDispositivo = null;
+
+        var adheridos = await ctx.SsAts.Where(a => a.AtsGrupoId == atsGrupoId).ToListAsync();
+        foreach (var a in adheridos)
+        {
+            Nota("Autoriza", a.AutorizaNombre, a.AutorizaHoraServidor);
+            Nota("SSOMA", a.SsomaNombre, a.SsomaHoraServidor);
+            a.CapatazWorkerId = null; a.CapatazNombre = null; a.CapatazCargo = null; a.CapatazFirmaUrl = null; a.CapatazFirmaHash = null; a.CapatazHoraServidor = null;
+            a.AutorizaWorkerId = null; a.AutorizaNombre = null; a.AutorizaCargo = null; a.AutorizaFirmaUrl = null; a.AutorizaFirmaHash = null; a.AutorizaHoraServidor = null;
+            a.SsomaWorkerId = null; a.SsomaNombre = null; a.SsomaCargo = null; a.SsomaFirmaUrl = null; a.SsomaFirmaHash = null; a.SsomaHoraServidor = null;
+        }
+
+        // Los PETAR grupales de la cuadrilla se reabren con ella: si quedaran "Cerrado", el recién sumado
+        // no podría adherirse a firmar su PETAR (UnirseAGrupo exige Activo).
+        // Supervisor y SSOMA deben firmar de nuevo el PETAR con la cuadrilla ampliada; las firmas de los
+        // trabajadores ya adheridos (SsPetar) no se tocan.
+        var petaresGrupo = await ctx.SsPetarGrupo.Where(p => p.AtsGrupoId == atsGrupoId).ToListAsync();
+        foreach (var p in petaresGrupo)
+        {
+            Nota("PETAR Capataz", p.CapatazNombre, p.CapatazHoraServidor);
+            p.CapatazWorkerId = null; p.CapatazNombre = null; p.CapatazCargo = null; p.CapatazFirmaUrl = null; p.CapatazFirmaHash = null; p.CapatazHoraServidor = null;
+            p.CapatazSelfieUrl = null; p.CapatazSelfieHash = null; p.CapatazLat = null; p.CapatazLng = null; p.CapatazPrecisionMetros = null; p.CapatazHoraDispositivo = null;
+            Nota("PETAR Supervisor", p.SupervisorNombre, p.SupervisorHoraServidor);
+            Nota("PETAR SSOMA", p.SsomaNombre, p.SsomaHoraServidor);
+            p.Estado = "Activo";
+            p.SupervisorWorkerId = null;
+            p.SupervisorNombre = null;
+            p.SupervisorCargo = null;
+            p.SupervisorFirmaUrl = null;
+            p.SupervisorFirmaHash = null;
+            p.SupervisorHoraServidor = null;
+            p.SsomaWorkerId = null;
+            p.SsomaNombre = null;
+            p.SsomaCargo = null;
+            p.SsomaFirmaUrl = null;
+            p.SsomaFirmaHash = null;
+            p.SsomaHoraServidor = null;
+            p.UpdatedAt = DateTime.UtcNow;
+        }
         await ctx.SaveChangesAsync();
+        return previas.Count == 0 ? null : "Firmas invalidadas — " + string.Join("; ", previas);
     }
 
     public async Task AgregarEventoGrupo(int atsGrupoId, string evento, int? workerId, string? detalle)
@@ -1980,7 +2132,7 @@ public class AtsRepository : IAtsRepository
     {
         using var ctx = _factory.CreateDbContext();
         var ev = await ctx.SsAtsGrupoEvento.AsNoTracking()
-            .Where(e => e.AtsGrupoId == atsGrupoId)
+            .Where(e => e.AtsGrupoId == atsGrupoId && e.Evento != "RecordatorioCierre")
             .OrderByDescending(e => e.CreatedAt).FirstOrDefaultAsync();
         if (ev is null) return null;
         var quien = ev.WorkerId.HasValue

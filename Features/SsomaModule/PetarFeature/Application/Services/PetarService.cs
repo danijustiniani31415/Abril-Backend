@@ -105,15 +105,22 @@ public class PetarService : IPetarService
         var responsables = await _atsRepository.GetResponsables(petar.ProyectoId);
         var callerEmail = await _atsRepository.GetEmailCorporativoWorker(workerId);
 
-        var esResidente = await _residentes.EsResidenteDelProyectoAsync(callerUserId, petar.ProyectoId);
+        var esResidente = await EsSupervisorDelProyecto(callerUserId, workerId, petar.ProyectoId);
         var esSsoma = callerEmail != null && responsables.SsomaEmails.Contains(callerEmail, StringComparer.OrdinalIgnoreCase);
 
-        if (!esAdmin && petar.WorkerId != workerId && !esResidente && !esSsoma)
+        var esCapataz = await _atsRepository.EsCapatazDeProyecto(workerId, petar.ProyectoId);
+        if (!esAdmin && petar.WorkerId != workerId && !esResidente && !esSsoma && !esCapataz)
             throw new AbrilException("Este PETAR no te pertenece.", 403);
 
-        MarcarPermisos(petar, workerId, esResidente || esAdmin, esSsoma || esAdmin);
+        MarcarPermisos(petar, workerId, esResidente || esAdmin, esSsoma || esAdmin, esCapataz || esAdmin, await _atsRepository.EsObreroDeObra(petar.WorkerId));
         return petar;
     }
+
+    /// <summary>Quién firma como «Supervisor» del PETAR: el Residente de la obra o el Ing./Arq. de Producción
+    /// de esa obra (igual que el «Autoriza» del ATS).</summary>
+    private async Task<bool> EsSupervisorDelProyecto(int callerUserId, int workerId, int proyectoId)
+        => await _residentes.EsResidenteDelProyectoAsync(callerUserId, proyectoId)
+           || await _atsRepository.EsProduccionDeProyecto(workerId, proyectoId);
 
     public async Task<PetarListResponseDto> Listar(PetarFiltroDto filtro, int callerUserId, int workerId, bool esAdmin)
     {
@@ -122,6 +129,8 @@ public class PetarService : IPetarService
         var obrasDondeEsResidente = (await _residentes.ProyectosDelResidenteAsync(callerUserId)).ToHashSet();
 
         var cache = new Dictionary<int, Abril_Backend.Features.SsomaModule.AtsFeature.Application.Dtos.AtsResponsablesDto>();
+        var capatazPorProyecto = new Dictionary<int, bool>();
+        var obreroPorWorker = new Dictionary<int, bool>();
         foreach (var petar in res.Data)
         {
             if (!cache.TryGetValue(petar.ProyectoId, out var responsables))
@@ -130,18 +139,26 @@ public class PetarService : IPetarService
                 cache[petar.ProyectoId] = responsables;
             }
 
-            var esResidente = obrasDondeEsResidente.Contains(petar.ProyectoId);
+            var esResidente = obrasDondeEsResidente.Contains(petar.ProyectoId)
+                || await _atsRepository.EsProduccionDeProyecto(workerId, petar.ProyectoId);
             var esSsoma = callerEmail != null && responsables.SsomaEmails.Contains(callerEmail, StringComparer.OrdinalIgnoreCase);
-            MarcarPermisos(petar, workerId, esResidente || esAdmin, esSsoma || esAdmin);
+            if (!capatazPorProyecto.TryGetValue(petar.ProyectoId, out var esCapataz))
+                capatazPorProyecto[petar.ProyectoId] = esCapataz = await _atsRepository.EsCapatazDeProyecto(workerId, petar.ProyectoId);
+            if (!obreroPorWorker.TryGetValue(petar.WorkerId, out var esObrero))
+                obreroPorWorker[petar.WorkerId] = esObrero = await _atsRepository.EsObreroDeObra(petar.WorkerId);
+            MarcarPermisos(petar, workerId, esResidente || esAdmin, esSsoma || esAdmin, esCapataz || esAdmin, esObrero);
         }
 
         return res;
     }
 
-    private static void MarcarPermisos(PetarResponseDto p, int workerId, bool esResidente, bool esSsoma)
+    private static void MarcarPermisos(PetarResponseDto p, int workerId, bool esResidente, bool esSsoma, bool esCapataz, bool requiereCapataz)
     {
-        p.PuedeFirmarSupervisor = esResidente && p.FirmaUrl != null && p.SupervisorFirmaUrl == null && p.Estado == "Borrador";
-        p.PuedeFirmarSsoma = esSsoma && p.FirmaUrl != null && p.SsomaFirmaUrl == null && p.Estado == "Borrador";
+        // Cadena: Capataz (solo si el ejecutante es obrero) → Supervisor (Residente/Producción) → SSOMA.
+        p.RequiereCapataz = requiereCapataz;
+        p.PuedeFirmarCapataz = esCapataz && requiereCapataz && p.FirmaUrl != null && p.CapatazFirmaUrl == null && p.Estado == "Borrador";
+        p.PuedeFirmarSupervisor = esResidente && p.FirmaUrl != null && p.SupervisorFirmaUrl == null && p.Estado == "Borrador" && (!requiereCapataz || p.CapatazFirmaUrl != null);
+        p.PuedeFirmarSsoma = esSsoma && p.FirmaUrl != null && p.SupervisorFirmaUrl != null && p.SsomaFirmaUrl == null && p.Estado == "Borrador";
         p.PuedeCerrar = p.WorkerId == workerId && p.Estado == "Firmado";
     }
 
@@ -177,17 +194,17 @@ public class PetarService : IPetarService
                 "La selfie ya había sido usada en otro PETAR/ATS — revisar manualmente.", hashAnterior ?? string.Empty, hash);
         }
 
-        await AvisarResponsables(entidad.ProyectoId);
+        // PETAR de cuadrilla: el aviso sale al cerrar el ATS grupal, no por cada adherido.
+        if (entidad.PetarGrupoId == null)
+            await AvisarResponsables(entidad.ProyectoId, await _atsRepository.EsObreroDeObra(entidad.WorkerId));
     }
 
-    private async Task AvisarResponsables(int proyectoId)
+    private async Task AvisarResponsables(int proyectoId, bool esObrero)
     {
         var responsables = await _atsRepository.GetResponsables(proyectoId);
-        var destinatarios = new List<string>();
-        if (!string.IsNullOrWhiteSpace(responsables.ResidenteEmail)) destinatarios.Add(responsables.ResidenteEmail);
-        destinatarios.AddRange(responsables.SsomaEmails);
+        // Cadena: Capataz (si es obrero) → Supervisor (Residente/Producción) → SSOMA; cada uno recibe el aviso cuando le toca.
+        var destinatarios = await _atsRepository.GetEmailsNivel(proyectoId, esObrero ? "Capataz" : "Autoriza");
         if (destinatarios.Count == 0) return;
-
         try
         {
             await _notificacionesService.CrearPorCorreosAsync(
@@ -198,12 +215,60 @@ public class PetarService : IPetarService
                 {
                     Titulo = "PETAR de alto riesgo pendiente de tu firma",
                     Subtitulo = responsables.ProyectoNombre,
-                    Descripcion = "Un PETAR ya fue firmado por el ejecutante y está pendiente de Supervisor/Visto Bueno SSOMA antes de poder iniciar el trabajo.",
+                    Descripcion = esObrero
+                        ? "Un PETAR ya fue firmado por el ejecutante y espera tu firma como Capataz/Maestro de obra."
+                        : "Un PETAR ya fue firmado por el ejecutante y espera tu firma como Supervisor (Residente/Producción) antes de poder iniciar el trabajo.",
                     Referencia = "/ssoma/gestion/ats",
                 }]);
         }
         catch { /* best-effort */ }
     }
+
+    private async Task AvisarSupervisor(int proyectoId)
+    {
+        try
+        {
+            var responsables = await _atsRepository.GetResponsables(proyectoId);
+            var destinatarios = await _atsRepository.GetEmailsNivel(proyectoId, "Autoriza");
+            if (destinatarios.Count == 0) return;
+            await _notificacionesService.CrearPorCorreosAsync(
+                "ATS_PENDIENTE_FIRMA",
+                destinatarios,
+                origenUserId: null,
+                items: [new NuevaNotificacionDto
+                {
+                    Titulo = "PETAR pendiente de tu firma (Supervisor)",
+                    Subtitulo = responsables.ProyectoNombre,
+                    Descripcion = "El Capataz/Maestro de obra ya firmó un PETAR de alto riesgo y espera tu firma como Supervisor (Residente/Producción).",
+                    Referencia = "/ssoma/gestion/ats",
+                }]);
+        }
+        catch { /* best-effort */ }
+    }
+
+    private async Task AvisarSsoma(int proyectoId)
+    {
+        try
+        {
+            var responsables = await _atsRepository.GetResponsables(proyectoId);
+            if (responsables.SsomaEmails.Count == 0) return;
+            await _notificacionesService.CrearPorCorreosAsync(
+                "ATS_PENDIENTE_FIRMA",
+                responsables.SsomaEmails,
+                origenUserId: null,
+                items: [new NuevaNotificacionDto
+                {
+                    Titulo = "PETAR pendiente de Visto Bueno SSOMA",
+                    Subtitulo = responsables.ProyectoNombre,
+                    Descripcion = "El Supervisor ya firmó un PETAR de alto riesgo y espera tu Visto Bueno.",
+                    Referencia = "/ssoma/gestion/ats",
+                }]);
+        }
+        catch { /* best-effort */ }
+    }
+
+    public async Task FirmarCapataz(int id, int callerUserId, bool esAdmin, PetarFirmarVistoRequestDto body)
+        => await FirmarVistoComun(id, callerUserId, esAdmin, body, "Capataz");
 
     public async Task FirmarSupervisor(int id, int callerUserId, bool esAdmin, PetarFirmarVistoRequestDto body)
         => await FirmarVistoComun(id, callerUserId, esAdmin, body, "Supervisor");
@@ -218,12 +283,56 @@ public class PetarService : IPetarService
         var firmaBytes = await ObtenerFirmaDigitalObligatoria(workerId);
         var responsables = await _atsRepository.GetResponsables(entidad.ProyectoId);
 
+        // Cuadrilla cerrada: mientras esté abierta todavía puede sumarse gente.
+        var ats = await _atsRepository.GetEntidad(entidad.AtsId);
+        if (ats?.AtsGrupoId != null)
+        {
+            var atsGrupo = await _atsRepository.GetGrupoEntidad(ats.AtsGrupoId.Value);
+            if (atsGrupo?.Estado != "Cerrado")
+                throw new AbrilException("Cierra la cuadrilla del ATS antes de validar el PETAR: todavía puede sumarse gente.", 409);
+        }
+
+        // Orden de la cadena: Capataz (solo si el ejecutante es obrero) → Residente/Producción (Supervisor) → SSOMA.
+        var requiereCapataz = await _atsRepository.EsObreroDeObra(entidad.WorkerId);
+        var capatazFirmaUrl = entidad.CapatazFirmaUrl;
+        if (entidad.PetarGrupoId != null)
+            capatazFirmaUrl = (await _repository.GetGrupoEntidad(entidad.PetarGrupoId.Value))?.CapatazFirmaUrl;
+        if (rol == "Capataz")
+        {
+            if (!requiereCapataz)
+                throw new AbrilException("Este PETAR es de un Staff/supervisor, no requiere firma de Capataz.", 409);
+        }
+        else if (rol == "Supervisor")
+        {
+            if (requiereCapataz && capatazFirmaUrl == null)
+                throw new AbrilException("Falta la firma del Capataz/Maestro de obra. Debe firmar antes del Residente/Producción.", 409);
+        }
+        else
+        {
+            if (entidad.SupervisorFirmaUrl == null)
+                throw new AbrilException("Falta la firma del Residente/Producción. Debe firmar antes del Visto Bueno SSOMA.", 409);
+            // SSOMA firma AL FINAL: el ATS de origen debe tener ya Capataz (obreros) y Autoriza.
+            if (ats?.AtsGrupoId != null)
+            {
+                var estadoAtsPrev = await _atsRepository.GetEstadoGrupo(ats.AtsGrupoId.Value);
+                if (estadoAtsPrev != null && (estadoAtsPrev.AutorizaFirmados < estadoAtsPrev.EjecutantesFirmados || (estadoAtsPrev.RequiereCapataz && !estadoAtsPrev.CapatazVigente)))
+                    throw new AbrilException("Faltan firmas en el ATS (Capataz y/o Residente/Producción). SSOMA firma al final: primero debe completarse el ATS.", 409);
+            }
+            else if (ats != null && (ats.AutorizaFirmaUrl == null || (requiereCapataz && ats.CapatazFirmaUrl == null)))
+                throw new AbrilException("Faltan firmas en el ATS (Capataz y/o Residente/Producción). SSOMA firma al final: primero debe completarse el ATS.", 409);
+        }
+
         if (!esAdmin)
         {
-            if (rol == "Supervisor")
+            if (rol == "Capataz")
             {
-                if (!await _residentes.EsResidenteDelProyectoAsync(callerUserId, entidad.ProyectoId))
-                    throw new AbrilException("Solo el Residente/Supervisor asignado a este proyecto puede firmar este visto.", 403);
+                if (!await _atsRepository.EsCapatazDeProyecto(workerId, entidad.ProyectoId))
+                    throw new AbrilException("Solo el Capataz o Maestro de obra de este proyecto puede firmar este nivel.", 403);
+            }
+            else if (rol == "Supervisor")
+            {
+                if (!await EsSupervisorDelProyecto(callerUserId, workerId, entidad.ProyectoId))
+                    throw new AbrilException("Solo el Residente o el Ing./Arq. de Producción de este proyecto pueden firmar como Supervisor.", 403);
             }
             else
             {
@@ -240,10 +349,14 @@ public class PetarService : IPetarService
 
         // Si la otra firma ya existía, esta es la que completa las 3 y autoriza el inicio del
         // trabajo — el ejecutante es quien más necesita saberlo (está esperando para empezar).
-        var quedaAutorizado = rol == "Supervisor" ? entidad.SsomaFirmaUrl != null : entidad.SupervisorFirmaUrl != null;
+        var quedaAutorizado = rol == "Capataz" ? false : rol == "Supervisor" ? entidad.SsomaFirmaUrl != null : entidad.SupervisorFirmaUrl != null;
 
         await _repository.FirmarVisto(id, rol, workerId, nombre, cargo, firmaUrl, firmaHash, DateTime.UtcNow);
 
+        if (rol == "Capataz")
+            await AvisarSupervisor(entidad.ProyectoId);
+        if (rol == "Supervisor")
+            await AvisarSsoma(entidad.ProyectoId);
         if (quedaAutorizado)
             await AvisarEjecutanteAutorizado(entidad);
     }
@@ -318,6 +431,8 @@ public class PetarService : IPetarService
 
         byte[]? selfieBytes = petar.SelfieUrl != null ? await DescargarBytes(petar.SelfieUrl) : null;
         byte[]? firmaBytes = petar.FirmaUrl != null ? await DescargarBytes(petar.FirmaUrl) : null;
+        byte[]? firmaCapatazBytes = petar.CapatazFirmaUrl != null ? await DescargarBytes(petar.CapatazFirmaUrl) : null;
+        petar.RequiereCapataz = await _atsRepository.EsObreroDeObra(petar.WorkerId);
         byte[]? firmaSupervisorBytes = petar.SupervisorFirmaUrl != null ? await DescargarBytes(petar.SupervisorFirmaUrl) : null;
         byte[]? firmaSsomaBytes = petar.SsomaFirmaUrl != null ? await DescargarBytes(petar.SsomaFirmaUrl) : null;
 
@@ -329,7 +444,7 @@ public class PetarService : IPetarService
         if (logoPath != null)
             logoBytes = await File.ReadAllBytesAsync(logoPath);
 
-        var pdfBytes = PetarPdfService.Generar(petar, selfieBytes, firmaBytes, verificacionUrl, firmaSupervisorBytes, firmaSsomaBytes, logoBytes);
+        var pdfBytes = PetarPdfService.Generar(petar, selfieBytes, firmaBytes, verificacionUrl, firmaSupervisorBytes, firmaSsomaBytes, logoBytes, firmaCapatazBytes);
         var pdfHash = Convert.ToHexString(SHA256.HashData(pdfBytes));
 
         var container = _containerResolver.GetAtsContainerName();
@@ -339,6 +454,78 @@ public class PetarService : IPetarService
 
         await _repository.GuardarPdf(id, urls[0], pdfHash);
         return pdfBytes;
+    }
+
+    /// <summary>PDF del PETAR grupal: un solo documento por cuadrilla con la firma de cada trabajador adherido y la
+    /// firma única de Supervisor y SSOMA (las que falten salen como PENDIENTE).</summary>
+    public async Task<byte[]> GenerarPdfGrupo(int petarGrupoId)
+    {
+        var g = await _repository.GetGrupoParaPdf(petarGrupoId) ?? throw new AbrilException("PETAR grupal no encontrado.", 404);
+        var firmantes = g.Adhesiones.Where(a => a.FirmaUrl != null).OrderBy(a => a.Worker?.Person?.FullName).ToList();
+        if (firmantes.Count == 0)
+            throw new AbrilException("Todavía no firmó ningún trabajador de la cuadrilla en este PETAR.", 409);
+
+        var filas = new List<PetarGrupalFila>();
+        foreach (var a in firmantes)
+            filas.Add(new PetarGrupalFila(
+                a.Worker?.Person?.FullName ?? "—", a.HoraServidorFirma, a.Lat, a.Lng,
+                a.SelfieUrl != null ? await DescargarBytes(a.SelfieUrl) : null,
+                await DescargarBytes(a.FirmaUrl!)));
+
+        var requiereCapatazGrupo = (await _atsRepository.GetEstadoGrupo(g.AtsGrupoId))?.RequiereCapataz ?? false;
+        var capataz = requiereCapatazGrupo
+            ? new PetarGrupalFirma(g.CapatazNombre, g.CapatazCargo, g.CapatazHoraServidor,
+                g.CapatazFirmaUrl != null ? await DescargarBytes(g.CapatazFirmaUrl) : null)
+            : null;
+        var supervisor = new PetarGrupalFirma(g.SupervisorNombre, g.SupervisorCargo, g.SupervisorHoraServidor,
+            g.SupervisorFirmaUrl != null ? await DescargarBytes(g.SupervisorFirmaUrl) : null);
+        var ssoma = new PetarGrupalFirma(g.SsomaNombre, g.SsomaCargo, g.SsomaHoraServidor,
+            g.SsomaFirmaUrl != null ? await DescargarBytes(g.SsomaFirmaUrl) : null);
+
+        var hashCorto = HashVerificacionGrupo(g);
+        var baseUrl = _configuration["Frontend:BaseUrl"]?.TrimEnd('/') ?? "https://intranet.abril.pe";
+        var verificacionUrl = $"{baseUrl}/petar-verificar/{g.Id}?grupo=1&hash={hashCorto}";
+
+        var datos = new PetarGrupalDatos(
+            g.Tipo?.Codigo, g.Tipo?.Nombre, g.Codigo ?? $"PETG-{g.Id:D4}", g.AtsGrupo?.Codigo, g.Proyecto?.ProjectDescription,
+            g.DescripcionTrabajo, g.Lugar, g.Fecha, g.HoraInicio, g.HoraFin,
+            g.Respuestas.OrderBy(r => r.Orden).Select(r => (r.Texto, r.Respuesta)).ToList());
+
+        byte[]? logoBytes = null;
+        var logoPath = _logoPaths.FirstOrDefault(File.Exists);
+        if (logoPath != null)
+            logoBytes = await File.ReadAllBytesAsync(logoPath);
+
+        return PetarPdfService.GenerarGrupal(datos, filas, capataz, supervisor, ssoma, logoBytes, verificacionUrl, hashCorto);
+    }
+
+    /// <summary>Huella (12 hex) del contenido firmado del PETAR grupal: hashes de las firmas de cada trabajador +
+    /// Supervisor + SSOMA. Se recalcula al verificar, así no depende de una columna y el QR del PDF solo deja de
+    /// coincidir si cambió algo firmado (p. ej. se sumó un trabajador o firmó otro nivel).</summary>
+    private static string HashVerificacionGrupo(SsPetarGrupo g)
+    {
+        var partes = g.Adhesiones.Where(a => a.FirmaUrl != null).OrderBy(a => a.Id).Select(a => a.FirmaHash ?? string.Empty)
+            .Append(g.CapatazFirmaHash ?? string.Empty).Append(g.SupervisorFirmaHash ?? string.Empty).Append(g.SsomaFirmaHash ?? string.Empty);
+        var texto = $"petar-grupo|{g.Id}|{string.Join("|", partes)}";
+        return Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(texto)))[..12];
+    }
+
+    public async Task<PetarVerificacionPublicaDto> VerificarPublicoGrupo(int petarGrupoId, string? hash)
+    {
+        var g = await _repository.GetGrupoParaPdf(petarGrupoId);
+        if (g == null) return new PetarVerificacionPublicaDto { Encontrado = false, Valido = false };
+
+        var firmantes = g.Adhesiones.Count(a => a.FirmaUrl != null);
+        return new PetarVerificacionPublicaDto
+        {
+            Encontrado = true,
+            Valido = !string.IsNullOrWhiteSpace(hash) && string.Equals(hash, HashVerificacionGrupo(g), StringComparison.OrdinalIgnoreCase),
+            WorkerNombre = $"Cuadrilla de {firmantes} trabajador(es) — {g.Codigo}",
+            ProyectoNombre = g.Proyecto?.ProjectDescription,
+            TipoNombre = g.Tipo?.Nombre,
+            Fecha = g.Fecha,
+            Estado = g.Estado,
+        };
     }
 
     public async Task<PetarVerificacionPublicaDto> VerificarPublico(int id, string? hash)
@@ -416,6 +603,25 @@ public class PetarService : IPetarService
 
     /// <summary>Cualquier trabajador puede crear el checklist grupal (mismo criterio que el ATS
     /// grupal) — nace ligado a un ATS grupal ya existente, del que hereda el proyecto.</summary>
+    /// <summary>Genera el PETAR de la cuadrilla desde el QR, SIN cuenta: lo pide el autor de la cuadrilla o el Capataz/Maestro
+    /// del proyecto, identificándose con su nombre (lista acotada) + dígitos de DNI.</summary>
+    public async Task<PetarGrupoCrearResponseDto> CrearGrupoPublico(Guid atsToken, PetarGrupoCrearPublicoDto body)
+    {
+        var atsGrupo = await _atsRepository.GetGrupoPorToken(atsToken) ?? throw new AbrilException("Enlace inválido.", 404);
+        if (atsGrupo.QrExpiraEn < DateTime.UtcNow)
+            throw new AbrilException("Este enlace venció — el ATS grupal era para otra jornada.", 409);
+        if (atsGrupo.Estado is "Anulado" or "Reemplazado")
+            throw new AbrilException($"Este ATS grupal está {atsGrupo.Estado.ToLower()} — no se puede generar PETAR.", 409);
+        if (!await _atsRepository.DniCoincide(body.WorkerId, body.DniConfirmacion))
+            throw new AbrilException("Los dígitos de DNI no coinciden con el trabajador seleccionado.", 400);
+        if (atsGrupo.CreadoPorWorkerId != body.WorkerId
+            && !(await _atsRepository.GetCapatacesDeProyecto(atsGrupo.ProyectoId)).Any(c => c.WorkerId == body.WorkerId))
+            throw new AbrilException("Solo quien creó la cuadrilla o el Capataz/Maestro de obra del proyecto pueden generar el PETAR desde aquí.", 403);
+
+        body.AtsGrupoId = atsGrupo.Id;
+        return await CrearGrupo(body.WorkerId, body);
+    }
+
     public async Task<PetarGrupoCrearResponseDto> CrearGrupo(int workerId, PetarGrupoCrearRequestDto dto)
     {
         if (dto.TipoId <= 0)
@@ -472,13 +678,19 @@ public class PetarService : IPetarService
     /// individual.</summary>
     private async Task MarcarPermisosGrupo(PetarGrupoEstadoDto dto, int workerId, bool esAdmin, bool esResidenteDelProyecto)
     {
+        var estadoAts = await _atsRepository.GetEstadoGrupo(dto.AtsGrupoId);
+        dto.RequiereCapataz = estadoAts?.RequiereCapataz ?? false;
         if (dto.Estado != "Activo") return;
+        if (estadoAts?.Estado != "Cerrado") return;
         var responsables = await _atsRepository.GetResponsables(dto.ProyectoId);
-        var esResidente = esAdmin || esResidenteDelProyecto;
+        var esResidente = esAdmin || esResidenteDelProyecto || await _atsRepository.EsProduccionDeProyecto(workerId, dto.ProyectoId);
         var email = await _atsRepository.GetEmailCorporativoWorker(workerId);
         var esSsoma = esAdmin || (email != null && responsables.SsomaEmails.Contains(email, StringComparer.OrdinalIgnoreCase));
-        dto.PuedeFirmarSupervisor = esResidente && !dto.SupervisorFirmado;
-        dto.PuedeFirmarSsoma = esSsoma && !dto.SsomaFirmado;
+        var esCapataz = esAdmin || await _atsRepository.EsCapatazDeProyecto(workerId, dto.ProyectoId);
+        dto.PuedeFirmarCapataz = esCapataz && dto.RequiereCapataz && !dto.CapatazFirmado && dto.TotalAdhesiones > 0;
+        dto.PuedeFirmarSupervisor = esResidente && !dto.SupervisorFirmado && (!dto.RequiereCapataz || dto.CapatazFirmado);
+        var atsCompleto = estadoAts != null && estadoAts.AutorizaFirmados >= estadoAts.EjecutantesFirmados && (!estadoAts.RequiereCapataz || estadoAts.CapatazVigente);
+        dto.PuedeFirmarSsoma = esSsoma && dto.SupervisorFirmado && !dto.SsomaFirmado && atsCompleto;
     }
 
     public async Task CerrarGrupo(int id, int workerId, bool esAdmin)
@@ -487,6 +699,71 @@ public class PetarService : IPetarService
             throw new AbrilException("Este PETAR grupal no te pertenece.", 403);
         await _repository.CerrarGrupo(id);
     }
+
+    /// <summary>PETAR de la cuadrilla que esperan la firma del Capataz, para su página pública (la misma del ATS grupal).
+    /// Solo con la cuadrilla cerrada y si es de obreros; vacío en cualquier otro caso.</summary>
+    public async Task<List<PetarGrupoCapatazPublicoDto>> GetCapatazPublicoPetares(Guid atsToken)
+    {
+        var atsGrupo = await _atsRepository.GetGrupoPorToken(atsToken);
+        if (atsGrupo == null || atsGrupo.QrExpiraEn < DateTime.UtcNow || atsGrupo.Estado != "Cerrado") return [];
+        var estado = await _atsRepository.GetEstadoGrupo(atsGrupo.Id);
+        if (estado == null || !estado.RequiereCapataz) return [];
+
+        var lista = await _repository.GetEstadosPorAtsGrupo(atsGrupo.Id);
+        return lista.Where(p => p.TotalAdhesiones > 0).Select(p => new PetarGrupoCapatazPublicoDto
+        {
+            Id = p.Id, Codigo = p.Codigo, TipoNombre = p.TipoNombre, DescripcionTrabajo = p.DescripcionTrabajo,
+            TotalAdhesiones = p.TotalAdhesiones, CapatazFirmado = p.CapatazFirmado,
+        }).ToList();
+    }
+
+    /// <summary>El Capataz/Maestro SIN cuenta firma el PETAR de la cuadrilla desde el link público del ATS grupal: se
+    /// identifica con su nombre (lista acotada del proyecto) + dígitos del DNI y deja selfie + geolocalización, igual
+    /// que al firmar el ATS grupal.</summary>
+    public async Task FirmarCapatazGrupoPublico(int petarGrupoId, PetarGrupoCapatazFirmarPublicoDto body)
+    {
+        if (string.IsNullOrWhiteSpace(body.SelfieBase64))
+            throw new AbrilException("La selfie es obligatoria — es la prueba de que estás en obra.", 400);
+        if (!Guid.TryParse(body.AtsToken, out var atsToken))
+            throw new AbrilException("Enlace inválido.", 400);
+
+        var atsGrupo = await _atsRepository.GetGrupoPorToken(atsToken) ?? throw new AbrilException("Enlace inválido.", 404);
+        if (atsGrupo.QrExpiraEn < DateTime.UtcNow)
+            throw new AbrilException("Este enlace venció — el ATS grupal era para otra jornada.", 409);
+        var grupo = await _repository.GetGrupoEntidad(petarGrupoId) ?? throw new AbrilException("PETAR grupal no encontrado.", 404);
+        if (grupo.AtsGrupoId != atsGrupo.Id)
+            throw new AbrilException("Este PETAR no corresponde a este ATS.", 400);
+        if (atsGrupo.Estado != "Cerrado")
+            throw new AbrilException("La cuadrilla todavía está abierta: el autor debe cerrarla antes de que firmes.", 409);
+
+        var estadoAts = await _atsRepository.GetEstadoGrupo(atsGrupo.Id);
+        if (estadoAts == null || !estadoAts.RequiereCapataz)
+            throw new AbrilException("Esta cuadrilla es de Staff/supervisores — no requiere firma de Capataz.", 409);
+        var estadoPetar = await _repository.GetEstadoGrupo(petarGrupoId);
+        if (estadoPetar == null || estadoPetar.TotalAdhesiones == 0)
+            throw new AbrilException("Todavía no firmó ningún trabajador de la cuadrilla en este PETAR.", 409);
+        if (grupo.CapatazFirmaUrl != null)
+            throw new AbrilException("Este PETAR ya tiene la firma del Capataz/Maestro de obra.", 409);
+
+        if (!await _atsRepository.DniCoincide(body.WorkerId, body.DniConfirmacion))
+            throw new AbrilException("Los dígitos de DNI no coinciden con el trabajador seleccionado.", 400);
+        var capataces = await _atsRepository.GetCapatacesDeProyecto(grupo.ProyectoId);
+        if (!capataces.Any(c => c.WorkerId == body.WorkerId))
+            throw new AbrilException("Solo el Capataz o Maestro de obra de este proyecto puede firmar este nivel.", 403);
+
+        var (nombre, cargo) = await _atsRepository.GetNombreYCargo(body.WorkerId);
+        var firmaBytes = await ObtenerFirmaDigitalObligatoria(body.WorkerId);
+        var firmaHash = Convert.ToHexString(SHA256.HashData(firmaBytes));
+        var firmaUrl = await SubirBytes("capataz-grupo", body.WorkerId, firmaBytes, "png");
+        var (selfieUrl, selfieHash) = await SubirImagenConHash("capatazselfie", body.WorkerId, body.SelfieBase64);
+
+        await _repository.FirmarVistoGrupo(petarGrupoId, "Capataz", body.WorkerId, nombre, cargo, firmaUrl, firmaHash, DateTime.UtcNow,
+            new PetarEvidenciaPresencia(selfieUrl, selfieHash, body.Lat, body.Lng, body.PrecisionMetros, body.HoraDispositivo));
+        await AvisarSupervisor(grupo.ProyectoId);
+    }
+
+    public Task FirmarCapatazGrupo(int id, int callerUserId, bool esAdmin, PetarFirmarVistoRequestDto body)
+        => FirmarVistoGrupoComun(id, callerUserId, esAdmin, body, "Capataz");
 
     public Task FirmarSupervisorGrupo(int id, int callerUserId, bool esAdmin, PetarFirmarVistoRequestDto body)
         => FirmarVistoGrupoComun(id, callerUserId, esAdmin, body, "Supervisor");
@@ -500,13 +777,48 @@ public class PetarService : IPetarService
         var workerId = await _atsRepository.ResolverWorkerIdAsync(callerUserId);
         var firmaBytes = await ObtenerFirmaDigitalObligatoria(workerId);
 
+        var atsGrupoPadre = await _atsRepository.GetGrupoEntidad(grupo.AtsGrupoId);
+        if (atsGrupoPadre?.Estado != "Cerrado")
+            throw new AbrilException("Cierra la cuadrilla del ATS antes de validar el PETAR: todavía puede sumarse gente.", 409);
+
+        var estadoPetar = await _repository.GetEstadoGrupo(id);
+        if (estadoPetar == null || estadoPetar.TotalAdhesiones == 0)
+            throw new AbrilException("Todavía no firmó ningún trabajador de la cuadrilla en este PETAR.", 409);
+
+        // Orden de la cadena: Capataz (solo cuadrillas de obreros) → Residente/Producción (Supervisor) → SSOMA.
+        var estadoAtsPadre = await _atsRepository.GetEstadoGrupo(grupo.AtsGrupoId);
+        var requiereCapataz = estadoAtsPadre?.RequiereCapataz ?? false;
+        if (rol == "Capataz")
+        {
+            if (!requiereCapataz)
+                throw new AbrilException("Esta cuadrilla es de Staff/supervisores — no requiere firma de Capataz.", 409);
+        }
+        else if (rol == "Supervisor")
+        {
+            if (requiereCapataz && grupo.CapatazFirmaUrl == null)
+                throw new AbrilException("Falta la firma del Capataz/Maestro de obra. Debe firmar antes del Residente/Producción.", 409);
+        }
+        else
+        {
+            if (grupo.SupervisorFirmaUrl == null)
+                throw new AbrilException("Falta la firma del Residente/Producción. Debe firmar antes del Visto Bueno SSOMA.", 409);
+            // SSOMA firma AL FINAL: el ATS de la cuadrilla debe tener ya Capataz (obreros) y Autoriza sobre todos.
+            if (estadoAtsPadre != null && (estadoAtsPadre.AutorizaFirmados < estadoAtsPadre.EjecutantesFirmados || (estadoAtsPadre.RequiereCapataz && !estadoAtsPadre.CapatazVigente)))
+                throw new AbrilException("Faltan firmas en el ATS (Capataz y/o Residente/Producción). SSOMA firma al final: primero debe completarse el ATS.", 409);
+        }
+
         if (!esAdmin)
         {
             var responsables = await _atsRepository.GetResponsables(grupo.ProyectoId);
-            if (rol == "Supervisor")
+            if (rol == "Capataz")
             {
-                if (!await _residentes.EsResidenteDelProyectoAsync(callerUserId, grupo.ProyectoId))
-                    throw new AbrilException("Solo el Residente/Supervisor asignado a este proyecto puede firmar este visto.", 403);
+                if (!await _atsRepository.EsCapatazDeProyecto(workerId, grupo.ProyectoId))
+                    throw new AbrilException("Solo el Capataz o Maestro de obra de este proyecto puede firmar este nivel.", 403);
+            }
+            else if (rol == "Supervisor")
+            {
+                if (!await EsSupervisorDelProyecto(callerUserId, workerId, grupo.ProyectoId))
+                    throw new AbrilException("Solo el Residente o el Ing./Arq. de Producción de este proyecto pueden firmar como Supervisor.", 403);
             }
             else
             {
@@ -522,6 +834,10 @@ public class PetarService : IPetarService
         var firmaUrl = await SubirBytes(rol.ToLower() + "-grupo", workerId, firmaBytes, "png");
 
         await _repository.FirmarVistoGrupo(id, rol, workerId, nombre, cargo, firmaUrl, firmaHash, DateTime.UtcNow);
+        if (rol == "Capataz")
+            await AvisarSupervisor(grupo.ProyectoId);
+        if (rol == "Supervisor")
+            await AvisarSsoma(grupo.ProyectoId);
     }
 
     /// <summary>Adhesión liviana a un PETAR grupal — mismo QR/token que el ATS grupal del que

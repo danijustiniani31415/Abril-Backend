@@ -85,6 +85,9 @@ public class AtsPetarResumenDto
     /// <summary>true si ya existe firma del ejecutante en este PETAR — sin ella no se puede
     /// descargar el PDF ni firmar Supervisor/SSOMA.</summary>
     public bool TieneFirmaEjecutante { get; set; }
+    /// <summary>true si este PETAR ya tiene la firma del Capataz/Maestro (cuando la cadena la exige).</summary>
+    public bool CapatazFirmado { get; set; }
+    public bool PuedeFirmarCapataz { get; set; }
     public bool SupervisorFirmado { get; set; }
     public bool SsomaFirmado { get; set; }
     /// <summary>Mismo criterio que en PETAR → Listar: Residente del proyecto (o admin), con firma
@@ -642,6 +645,8 @@ public class AtsGrupoEstadoDto
     /// <summary>Integrantes esperados (lista previa) con marca de quién ya firmó; vacío si no se definió.</summary>
     public List<AtsGrupoIntegranteDto> Esperados { get; set; } = [];
     public bool PuedeReabrir { get; set; }
+    /// <summary>Autor, Residente, Producción, SSOMA o admin, con la cuadrilla abierta y al menos un trabajador firmado.</summary>
+    public bool PuedeCerrar { get; set; }
     public bool PuedeEditarIntegrantes { get; set; }
     /// <summary>Quien abre el panel creó este grupo / ya firmó su propio ATS dentro de él — el autor también es
     /// un ejecutante y debe firmar como los demás.</summary>
@@ -671,8 +676,17 @@ public class AtsGrupoCapatazPublicoDto
     public List<string> TrabajadoresAdheridos { get; set; } = [];
     public bool YaFirmo { get; set; }
     public bool Vigente { get; set; }
+    /// <summary>La cuadrilla sigue abierta: todavía no se puede firmar, pero el Capataz puede cerrarla desde aquí.</summary>
+    public bool Abierta { get; set; }
     public int NuevosSinValidar { get; set; }
     public List<AtsGrupoWorkerOpcionDto> Capataces { get; set; } = [];
+}
+
+/// <summary>El autor de una cuadrilla (sin cuenta) cierra desde su página pública: nombre + dígitos de su DNI.</summary>
+public class AtsGrupoCerrarPublicoRequestDto
+{
+    public int WorkerId { get; set; }
+    public string DniConfirmacion { get; set; } = string.Empty;
 }
 
 public class AtsGrupoCapatazFirmarRequestDto

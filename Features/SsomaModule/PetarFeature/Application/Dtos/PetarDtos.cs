@@ -129,6 +129,14 @@ public class PetarResponseDto
     public string? SelfieUrl { get; set; }
     public string? FirmaUrl { get; set; }
 
+    public string? CapatazNombre { get; set; }
+    public string? CapatazCargo { get; set; }
+    public string? CapatazFirmaUrl { get; set; }
+    public DateTime? CapatazHoraServidor { get; set; }
+    /// <summary>true si el ejecutante es obrero: la cadena del PETAR lleva firma de Capataz antes del Supervisor.</summary>
+    public bool RequiereCapataz { get; set; }
+    public bool PuedeFirmarCapataz { get; set; }
+
     public string? SupervisorNombre { get; set; }
     public string? SupervisorCargo { get; set; }
     public string? SupervisorFirmaUrl { get; set; }
@@ -200,19 +208,58 @@ public class PetarGrupoCrearRequestDto
     public List<PetarItemRespuestaRequestDto> Respuestas { get; set; } = [];
 }
 
+/// <summary>Generar el PETAR de la cuadrilla desde el QR (sin cuenta): quien lo pide se identifica con nombre + DNI.</summary>
+public class PetarGrupoCrearPublicoDto : PetarGrupoCrearRequestDto
+{
+    public int WorkerId { get; set; }
+    public string DniConfirmacion { get; set; } = string.Empty;
+}
+
 public class PetarGrupoCrearResponseDto
 {
     public int Id { get; set; }
 }
 
 /// <summary>Panel del autor: estado del checklist grupal y cuántos ejecutantes ya se adhirieron.</summary>
+/// <summary>Evidencia de presencia (selfie + geo) que acompaña una firma hecha por link público.</summary>
+public record PetarEvidenciaPresencia(string? SelfieUrl, string? SelfieHash, decimal? Lat, decimal? Lng, decimal? PrecisionMetros, DateTime? HoraDispositivo);
+
+/// <summary>PETAR de la cuadrilla que espera la firma del Capataz, visto desde su página pública.</summary>
+public class PetarGrupoCapatazPublicoDto
+{
+    public int Id { get; set; }
+    public string Codigo { get; set; } = string.Empty;
+    public string? TipoNombre { get; set; }
+    public string DescripcionTrabajo { get; set; } = string.Empty;
+    public int TotalAdhesiones { get; set; }
+    public bool CapatazFirmado { get; set; }
+}
+
+public class PetarGrupoCapatazFirmarPublicoDto
+{
+    public string AtsToken { get; set; } = string.Empty;
+    public int WorkerId { get; set; }
+    public string DniConfirmacion { get; set; } = string.Empty;
+    public string SelfieBase64 { get; set; } = string.Empty;
+    public DateTime? HoraDispositivo { get; set; }
+    public decimal? Lat { get; set; }
+    public decimal? Lng { get; set; }
+    public decimal? PrecisionMetros { get; set; }
+}
+
 public class PetarGrupoEstadoDto
 {
     public int Id { get; set; }
+    public string Codigo { get; set; } = string.Empty;
+    public string? AtsCodigo { get; set; }
+    public int AtsGrupoId { get; set; }
     public int ProyectoId { get; set; }
     public string? TipoNombre { get; set; }
     public string DescripcionTrabajo { get; set; } = string.Empty;
     public string Estado { get; set; } = string.Empty;
+    public bool RequiereCapataz { get; set; }
+    public bool CapatazFirmado { get; set; }
+    public bool PuedeFirmarCapataz { get; set; }
     public bool SupervisorFirmado { get; set; }
     public bool SsomaFirmado { get; set; }
     public bool PuedeFirmarSupervisor { get; set; }

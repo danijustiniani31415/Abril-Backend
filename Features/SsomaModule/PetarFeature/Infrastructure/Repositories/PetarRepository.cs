@@ -208,14 +208,14 @@ public class PetarRepository : IPetarRepository
 
     /// <summary>"{ABREV}-PETAR-0001": abreviatura del proyecto + correlativo propio de ese proyecto
     /// (upsert atómico, sin números repetidos).</summary>
-    private static async Task<string> SiguienteCodigoPetar(AppDbContext ctx, int proyectoId)
+    private static async Task<string> SiguienteCodigoPetar(AppDbContext ctx, int proyectoId, string tipo = "PETAR")
     {
         var abrev = await ctx.Project.Where(p => p.ProjectId == proyectoId)
             .Select(p => p.Abbreviation ?? p.Codigo).FirstOrDefaultAsync() ?? "PRY";
         var res = await ctx.Database.SqlQuery<int>(
-            $"INSERT INTO ss_documento_correlativo (proyecto_id, tipo, ultimo) VALUES ({proyectoId}, 'PETAR', 1) ON CONFLICT (proyecto_id, tipo) DO UPDATE SET ultimo = ss_documento_correlativo.ultimo + 1 RETURNING ultimo AS \"Value\"")
+            $"INSERT INTO ss_documento_correlativo (proyecto_id, tipo, ultimo) VALUES ({proyectoId}, {tipo}, 1) ON CONFLICT (proyecto_id, tipo) DO UPDATE SET ultimo = ss_documento_correlativo.ultimo + 1 RETURNING ultimo AS \"Value\"")
             .ToListAsync();
-        return $"{abrev.Trim().ToUpperInvariant()}-PETAR-{res[0]:D4}";
+        return $"{abrev.Trim().ToUpperInvariant()}-{tipo}-{res[0]:D4}";
     }
 
     /// <summary>Cuando este PETAR nació de un PETAR grupal, Supervisor/SSOMA no viven en la fila
@@ -227,6 +227,10 @@ public class PetarRepository : IPetarRepository
         var dto = ToDtoBase(p);
         if (p.PetarGrupoId.HasValue && p.PetarGrupo != null)
         {
+            dto.CapatazNombre = p.PetarGrupo.CapatazNombre;
+            dto.CapatazCargo = p.PetarGrupo.CapatazCargo;
+            dto.CapatazFirmaUrl = p.PetarGrupo.CapatazFirmaUrl;
+            dto.CapatazHoraServidor = p.PetarGrupo.CapatazHoraServidor;
             dto.SupervisorNombre = p.PetarGrupo.SupervisorNombre;
             dto.SupervisorCargo = p.PetarGrupo.SupervisorCargo;
             dto.SupervisorFirmaUrl = p.PetarGrupo.SupervisorFirmaUrl;
@@ -264,6 +268,10 @@ public class PetarRepository : IPetarRepository
         PrecisionMetros = p.PrecisionMetros,
         SelfieUrl = p.SelfieUrl,
         FirmaUrl = p.FirmaUrl,
+        CapatazNombre = p.CapatazNombre,
+        CapatazCargo = p.CapatazCargo,
+        CapatazFirmaUrl = p.CapatazFirmaUrl,
+        CapatazHoraServidor = p.CapatazHoraServidor,
         SupervisorNombre = p.SupervisorNombre,
         SupervisorCargo = p.SupervisorCargo,
         SupervisorFirmaUrl = p.SupervisorFirmaUrl,
@@ -311,9 +319,15 @@ public class PetarRepository : IPetarRepository
         var page = Math.Max(1, filtro.Page);
         var data = await query.Skip((page - 1) * PageSize).Take(PageSize).ToListAsync();
 
+        var dtos = data.Select(ToDto).ToList();
+        var atsIds = data.Select(p => p.AtsId).Distinct().ToList();
+        var atsCodigos = await ctx.SsAts.Where(a => atsIds.Contains(a.Id)).Select(a => new { a.Id, a.Codigo }).ToDictionaryAsync(a => a.Id, a => a.Codigo);
+        foreach (var dto in dtos)
+            dto.AtsCodigo = atsCodigos.GetValueOrDefault(dto.AtsId);
+
         return new PetarListResponseDto
         {
-            Data = data.Select(ToDto).ToList(),
+            Data = dtos,
             Page = page,
             PageSize = PageSize,
             TotalRecords = total,
@@ -364,7 +378,18 @@ public class PetarRepository : IPetarRepository
         if (petar.Estado != "Borrador")
             throw new AbrilException("Este PETAR ya está firmado/cerrado.", 409);
 
-        if (rol == "Supervisor")
+        if (rol == "Capataz")
+        {
+            if (petar.CapatazFirmaUrl != null)
+                throw new AbrilException("Este PETAR ya tiene la firma del Capataz/Maestro de obra.", 409);
+            petar.CapatazWorkerId = workerId;
+            petar.CapatazNombre = nombre;
+            petar.CapatazCargo = cargo;
+            petar.CapatazFirmaUrl = firmaUrl;
+            petar.CapatazFirmaHash = firmaHash;
+            petar.CapatazHoraServidor = horaServidor;
+        }
+        else if (rol == "Supervisor")
         {
             if (petar.SupervisorFirmaUrl != null)
                 throw new AbrilException("Este PETAR ya tiene la firma del Supervisor.", 409);
@@ -474,6 +499,7 @@ public class PetarRepository : IPetarRepository
 
         var grupo = new SsPetarGrupo
         {
+            Codigo = await SiguienteCodigoPetar(ctx, proyectoId, "PETG"),
             AtsGrupoId = dto.AtsGrupoId,
             TipoId = dto.TipoId,
             ProyectoId = proyectoId,
@@ -552,14 +578,19 @@ public class PetarRepository : IPetarRepository
             .Include(p => p.Worker).ThenInclude(w => w!.Person)
             .ToListAsync();
         var adheridosPorGrupo = adheridos.ToLookup(p => p.PetarGrupoId!.Value);
+        var atsCodigo = await ctx.SsAtsGrupo.Where(a => a.Id == atsGrupoId).Select(a => a.Codigo).FirstOrDefaultAsync();
 
         return grupos.Select(g => new PetarGrupoEstadoDto
         {
             Id = g.Id,
+            Codigo = g.Codigo ?? $"PETG-{g.Id:D4}",
+            AtsCodigo = atsCodigo,
+            AtsGrupoId = atsGrupoId,
             ProyectoId = g.ProyectoId,
             TipoNombre = g.Tipo?.Nombre,
             DescripcionTrabajo = g.DescripcionTrabajo,
             Estado = g.Estado,
+            CapatazFirmado = g.CapatazFirmaUrl != null,
             SupervisorFirmado = g.SupervisorFirmaUrl != null,
             SsomaFirmado = g.SsomaFirmaUrl != null,
             TotalAdhesiones = adheridosPorGrupo[g.Id].Count(),
@@ -571,6 +602,20 @@ public class PetarRepository : IPetarRepository
     {
         using var ctx = _factory.CreateDbContext();
         return await ctx.SsPetarGrupo.Include(g => g.Respuestas).FirstOrDefaultAsync(g => g.Id == id);
+    }
+
+    /// <summary>Grupo con lo que necesita el PDF: tipo, checklist, ATS grupal (código) y adhesiones con su trabajador.</summary>
+    public async Task<SsPetarGrupo?> GetGrupoParaPdf(int id)
+    {
+        using var ctx = _factory.CreateDbContext();
+        return await ctx.SsPetarGrupo.AsNoTracking()
+            .Include(g => g.Tipo)
+            .Include(g => g.Respuestas)
+            .Include(g => g.AtsGrupo)
+            .Include(g => g.Proyecto)
+            .Include(g => g.Adhesiones).ThenInclude(p => p.Worker).ThenInclude(w => w!.Person)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(g => g.Id == id);
     }
 
     public async Task<PetarGrupoEstadoDto?> GetEstadoGrupo(int id)
@@ -588,10 +633,14 @@ public class PetarRepository : IPetarRepository
         return new PetarGrupoEstadoDto
         {
             Id = grupo.Id,
+            Codigo = grupo.Codigo ?? $"PETG-{grupo.Id:D4}",
+            AtsGrupoId = grupo.AtsGrupoId,
+            AtsCodigo = await ctx.SsAtsGrupo.Where(a => a.Id == grupo.AtsGrupoId).Select(a => a.Codigo).FirstOrDefaultAsync(),
             ProyectoId = grupo.ProyectoId,
             TipoNombre = grupo.Tipo?.Nombre,
             DescripcionTrabajo = grupo.DescripcionTrabajo,
             Estado = grupo.Estado,
+            CapatazFirmado = grupo.CapatazFirmaUrl != null,
             SupervisorFirmado = grupo.SupervisorFirmaUrl != null,
             SsomaFirmado = grupo.SsomaFirmaUrl != null,
             TotalAdhesiones = adheridos.Count,
@@ -614,12 +663,32 @@ public class PetarRepository : IPetarRepository
         await ctx.SaveChangesAsync();
     }
 
-    public async Task FirmarVistoGrupo(int petarGrupoId, string rol, int workerId, string nombre, string? cargo, string firmaUrl, string firmaHash, DateTime horaServidor)
+    public async Task FirmarVistoGrupo(int petarGrupoId, string rol, int workerId, string nombre, string? cargo, string firmaUrl, string firmaHash, DateTime horaServidor, PetarEvidenciaPresencia? evidencia = null)
     {
         using var ctx = _factory.CreateDbContext();
         var grupo = await ctx.SsPetarGrupo.FirstOrDefaultAsync(g => g.Id == petarGrupoId) ?? throw new AbrilException("PETAR grupal no encontrado.", 404);
 
-        if (rol == "Supervisor")
+        if (rol == "Capataz")
+        {
+            if (grupo.CapatazFirmaUrl != null)
+                throw new AbrilException("Este PETAR grupal ya tiene la firma del Capataz/Maestro de obra.", 409);
+            grupo.CapatazWorkerId = workerId;
+            grupo.CapatazNombre = nombre;
+            grupo.CapatazCargo = cargo;
+            grupo.CapatazFirmaUrl = firmaUrl;
+            grupo.CapatazFirmaHash = firmaHash;
+            grupo.CapatazHoraServidor = horaServidor;
+            if (evidencia != null)
+            {
+                grupo.CapatazSelfieUrl = evidencia.SelfieUrl;
+                grupo.CapatazSelfieHash = evidencia.SelfieHash;
+                grupo.CapatazLat = evidencia.Lat;
+                grupo.CapatazLng = evidencia.Lng;
+                grupo.CapatazPrecisionMetros = evidencia.PrecisionMetros;
+                grupo.CapatazHoraDispositivo = evidencia.HoraDispositivo;
+            }
+        }
+        else if (rol == "Supervisor")
         {
             if (grupo.SupervisorFirmaUrl != null)
                 throw new AbrilException("Este PETAR grupal ya tiene la firma del Supervisor.", 409);

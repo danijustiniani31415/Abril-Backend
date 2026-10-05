@@ -74,12 +74,9 @@ public class AtsService : IAtsService
         return await _repository.CrearPasoPersonalizado(categoriaId, texto.Trim());
     }
 
-    public async Task<int> Crear(int workerId, AtsGuardarRequestDto dto)
-    {
-        await ExigirAutorizacionPermiso(workerId);
-        Validar(dto);
-        return await _repository.Crear(workerId, dto);
-    }
+    /// <summary>Todo ATS nuevo nace de una cuadrilla (un trabajador solo = cuadrilla de 1); los individuales quedan como historial.</summary>
+    public Task<int> Crear(int workerId, AtsGuardarRequestDto dto)
+        => throw new AbrilException("Los ATS ahora se crean como cuadrilla (incluso para un solo trabajador). Usa «Nuevo ATS» → cuadrilla.", 409);
 
     public async Task Editar(int id, int workerId, AtsGuardarRequestDto dto)
     {
@@ -249,7 +246,7 @@ public class AtsService : IAtsService
             throw new AbrilException("Este ATS no te pertenece.", 403);
 
         MarcarPermisos(ats, esCapataz, esAutoriza, esSsoma);
-        await _repository.CompletarInfoPetar([ats], new() { [ats.Id] = (esAutoriza, esSsoma) });
+        await _repository.CompletarInfoPetar([ats], new() { [ats.Id] = (esAutoriza, esSsoma, esCapataz) });
         return ats;
     }
 
@@ -327,7 +324,7 @@ public class AtsService : IAtsService
         // Una sola consulta para saber quién es obrero entre todos los ejecutantes de la página.
         var esObreroPorWorkerId = await _repository.GetEsObreroDeObraBatch(res.Data.Select(a => a.WorkerId));
 
-        var permisosPorAtsId = new Dictionary<int, (bool, bool)>();
+        var permisosPorAtsId = new Dictionary<int, (bool, bool, bool)>();
         foreach (var ats in res.Data)
         {
             if (!responsablesPorProyecto.TryGetValue(ats.ProyectoId, out var responsables))
@@ -355,7 +352,7 @@ public class AtsService : IAtsService
             var (esCapatazEfectivo, esAutoriza, esSsoma) = CalcularPermisos(ats, workerId, esAdmin, responsables, callerEmail, esResidente, esProduccion, esPrevencionistaCaller, esCapataz, esObreroEjecutante);
             ats.RequiereCapataz = esObreroEjecutante;
             MarcarPermisos(ats, esCapatazEfectivo, esAutoriza, esSsoma);
-            permisosPorAtsId[ats.Id] = (esAutoriza, esSsoma);
+            permisosPorAtsId[ats.Id] = (esAutoriza, esSsoma, esCapatazEfectivo);
         }
 
         var obsPorAts = await _repository.ContarObservacionesAbiertasPorAts(res.Data.Select(a => a.Id));
@@ -427,7 +424,7 @@ public class AtsService : IAtsService
                 "La selfie ya había sido usada en otro ATS — revisar manualmente.", hashAnterior ?? string.Empty, hash);
         }
 
-        await AvisarResponsables(id, entidad.ProyectoId);
+        await AvisarResponsables(entidad);
     }
 
     /// <summary>
@@ -440,30 +437,41 @@ public class AtsService : IAtsService
     /// en el sistema, CrearPorCorreosAsync simplemente no crea nada — no bloquea la firma del
     /// ejecutante, que ya quedó registrada.
     /// </summary>
-    private async Task AvisarResponsables(int atsId, int proyectoId)
+    private async Task AvisarResponsables(SsAts entidad)
     {
-        var responsables = await _repository.GetResponsables(proyectoId);
-
-        var destinatarios = new List<string>();
-        if (!string.IsNullOrWhiteSpace(responsables.ResidenteEmail)) destinatarios.Add(responsables.ResidenteEmail);
-        destinatarios.AddRange(responsables.SsomaEmails);
-        if (destinatarios.Count == 0) return;
-
         try
         {
+            var esObrero = await _repository.EsObreroDeObra(entidad.WorkerId);
+            var referencia = "/ssoma/gestion/ats";
+            // Cuadrilla: no se avisa por cada adherido; el aviso sale una sola vez, cuando se CIERRA (CerrarGrupo).
+            if (entidad.AtsGrupoId != null) return;
+            // La cadena es Capataz → Residente/Producción → SSOMA: se avisa solo a quien le toca firmar ahora.
+            await AvisarNivel(entidad.ProyectoId, esObrero ? "Capataz" : "Autoriza", referencia);
+        }
+        catch { /* best-effort: la firma del ejecutante ya quedó guardada, el aviso es una comodidad */ }
+    }
+
+    /// <summary>Avisa (campanita + push al celular) a quienes firman ese nivel de la cadena en el proyecto.</summary>
+    private async Task AvisarNivel(int proyectoId, string nivel, string referencia)
+    {
+        try
+        {
+            var destinatarios = await _repository.GetEmailsNivel(proyectoId, nivel);
+            if (destinatarios.Count == 0) return;
+            var responsables = await _repository.GetResponsables(proyectoId);
+            var (titulo, detalle) = nivel switch
+            {
+                "Capataz" => ("ATS pendiente de tu firma (Capataz)", "Un ATS ya fue firmado por el ejecutante y espera tu firma como Capataz/Maestro de obra."),
+                "Autoriza" => ("ATS pendiente de tu firma (Autoriza)", "Un ATS está listo para tu Autorización como Residente/Producción."),
+                _ => ("ATS pendiente de Visto Bueno SSOMA", "Un ATS ya tiene la firma del Residente/Producción y espera tu Visto Bueno."),
+            };
             await _notificacionesService.CrearPorCorreosAsync(
                 "ATS_PENDIENTE_FIRMA",
                 destinatarios,
                 origenUserId: null,
-                items: [new NuevaNotificacionDto
-                {
-                    Titulo = "ATS pendiente de tu firma",
-                    Subtitulo = responsables.ProyectoNombre,
-                    Descripcion = "Un ATS ya fue firmado por el ejecutante y está pendiente de tu Autorización/Visto Bueno.",
-                    Referencia = $"/ssoma/gestion/ats",
-                }]);
+                items: [new NuevaNotificacionDto { Titulo = titulo, Subtitulo = responsables.ProyectoNombre, Descripcion = detalle, Referencia = referencia }]);
         }
-        catch { /* best-effort: la firma del ejecutante ya quedó guardada, el aviso es una comodidad */ }
+        catch { /* best-effort */ }
     }
 
     public async Task FirmarCapataz(int id, int callerUserId, bool esAdmin, AtsFirmarVistoRequestDto body)
@@ -479,6 +487,7 @@ public class AtsService : IAtsService
     {
         var entidad = await _repository.GetEntidad(id) ?? throw new AbrilException("ATS no encontrado.", 404);
         if (entidad.Estado == "Anulado") throw new AbrilException("Este ATS está anulado.", 409);
+        if (entidad.AtsGrupoId != null) await ExigirGrupoCerrado(entidad.AtsGrupoId.Value);
         await ExigirSinObservacionesAbiertas(id, entidad.AtsGrupoId);
         var workerId = await _repository.ResolverWorkerIdAsync(callerUserId);
         var firmaBytes = await ObtenerFirmaDigitalObligatoria(workerId);
@@ -491,6 +500,14 @@ public class AtsService : IAtsService
             throw new AbrilException("Falta la firma del Capataz/Maestro de obra. Debe firmar antes del Residente/Producción.", 409);
         if (rol == "Ssoma" && entidad.AutorizaFirmaUrl == null)
             throw new AbrilException("Falta la firma del Residente/Producción. Debe firmar antes del Visto Bueno SSOMA.", 409);
+        // SSOMA firma AL FINAL: si el ATS tiene PETAR, antes deben estar firmados por el Capataz (obreros) y el Supervisor.
+        if (rol == "Ssoma")
+        {
+            var requiereCapatazPetar = entidad.AtsGrupoId != null
+                ? (await _repository.GetEstadoGrupo(entidad.AtsGrupoId.Value))?.RequiereCapataz ?? false
+                : await _repository.EsObreroDeObra(entidad.WorkerId);
+            await ExigirPetaresFirmadosParaSsoma(entidad.AtsGrupoId == null ? id : null, entidad.AtsGrupoId, requiereCapatazPetar);
+        }
 
         // Nadie se autovalida su propio ATS — excepto el Jefe/Administrador SSOMA (ver
         // PuedeAutorizarYVistoBueno): pidió acceso total, incluido sobre lo suyo.
@@ -532,6 +549,10 @@ public class AtsService : IAtsService
         var firmaUrl = await SubirBytes(rol.ToLower(), workerId, firmaBytes, "png");
 
         await _repository.FirmarVisto(id, rol, workerId, nombre, cargo, firmaUrl, firmaHash, DateTime.UtcNow);
+
+        // Pasa el turno al siguiente nivel. En cuadrilla lo avisa FirmarVistoGrupo/Capataz una sola vez.
+        if (entidad.AtsGrupoId == null && rol != "Ssoma")
+            await AvisarNivel(entidad.ProyectoId, rol == "Capataz" ? "Autoriza" : "Ssoma", "/ssoma/gestion/ats");
     }
 
     public async Task<byte[]> GenerarPdf(int id)
@@ -557,7 +578,7 @@ public class AtsService : IAtsService
         if (logoPath != null)
             logoBytes = await File.ReadAllBytesAsync(logoPath);
 
-        var pdfBytes = AtsPdfService.Generar(ats, selfieBytes, firmaBytes, verificacionUrl, firmaAutorizaBytes, firmaSsomaBytes, logoBytes, firmaCapatazBytes);
+        var pdfBytes = AtsPdfService.Generar(ats, selfieBytes, firmaBytes, verificacionUrl, firmaAutorizaBytes, firmaSsomaBytes, logoBytes, firmaCapatazBytes, await _repository.GetCodigosPetar(ats.AtsGrupoId == null ? id : null, ats.AtsGrupoId));
 
         var container = _containerResolver.GetAtsContainerName();
         using var stream = new MemoryStream(pdfBytes);
@@ -729,7 +750,8 @@ public class AtsService : IAtsService
         var esSsoma = (email != null && responsables.SsomaEmails.Contains(email, StringComparer.OrdinalIgnoreCase))
                       || await _repository.EsPrevencionistaAbril(workerId);
         var esAutor = await _repository.EsAutorDeGrupo(id, workerId);
-        if (!esAdmin && !esAutor && !esResidente && !esProduccion && !esSsoma)
+        var esCapatazGrupo = await _repository.EsCapatazDeProyecto(workerId, grupo.ProyectoId);
+        if (!esAdmin && !esAutor && !esResidente && !esProduccion && !esSsoma && !esCapatazGrupo)
             throw new AbrilException("Este ATS grupal no te pertenece.", 403);
 
         var estado = await _repository.GetEstadoGrupo(id) ?? throw new AbrilException("ATS grupal no encontrado.", 404);
@@ -740,6 +762,7 @@ public class AtsService : IAtsService
         // Reabrir: su autor, quienes validan la cadena en el proyecto (Residente/Producción/SSOMA) o un admin —
         // los que firman son justo quienes necesitan poder sumar a alguien que faltó.
         estado.PuedeReabrir = (esAdmin || esAutor || esResidente || esProduccion || esSsoma) && estado.Estado == "Cerrado" && grupo.Fecha == DateOnly.FromDateTime(DateTime.Today);
+        estado.PuedeCerrar = (esAdmin || esAutor || esCapatazGrupo || esResidente || esProduccion || esSsoma) && estado.Estado == "Activo" && estado.EjecutantesFirmados > 0;
         estado.AnuladoMotivo = grupo.AnuladoMotivo;
         estado.PuedeAnular = estado.Estado != "Anulado"
             && (esAdmin || esResidente || esProduccion || esSsoma || (esAutor && !await _repository.GrupoTieneValidaciones(id)));
@@ -751,8 +774,8 @@ public class AtsService : IAtsService
         }
         estado.UltimoEvento = await _repository.GetUltimoEventoGrupo(id);
         estado.PuedeCorregir = estado.Estado is "Activo" or "Cerrado" && (esAdmin || esAutor || esResidente || esProduccion);
-        estado.PuedeAutorizar = (esAdmin || esResidente || esProduccion) && estado.AutorizaFirmados < estado.EjecutantesFirmados;
-        estado.PuedeVistoBuenoSsoma = (esAdmin || esSsoma) && estado.SsomaFirmados < estado.EjecutantesFirmados;
+        estado.PuedeAutorizar = (esAdmin || esResidente || esProduccion) && estado.Estado == "Cerrado" && estado.AutorizaFirmados < estado.EjecutantesFirmados;
+        estado.PuedeVistoBuenoSsoma = (esAdmin || esSsoma) && estado.Estado == "Cerrado" && estado.SsomaFirmados < estado.EjecutantesFirmados;
         if (estado.Estado is "Anulado" or "Reemplazado")
         {
             estado.PuedeAutorizar = false;
@@ -799,7 +822,7 @@ public class AtsService : IAtsService
         if (logoPath != null)
             logoBytes = await File.ReadAllBytesAsync(logoPath);
 
-        return AtsPdfService.GenerarGrupal(contenido, grupo.Codigo ?? $"GRUPAL-{grupoId:D4}", filas, estado.RequiereCapataz, capataz, autoriza, ssoma, logoBytes);
+        return AtsPdfService.GenerarGrupal(contenido, grupo.Codigo ?? $"GRUPAL-{grupoId:D4}", filas, estado.RequiereCapataz, capataz, autoriza, ssoma, logoBytes, await _repository.GetCodigosPetar(null, grupoId));
     }
 
     /// <summary>Residente/Producción (rol "Autoriza") o SSOMA firman de una vez a TODA la cuadrilla: se aplica su
@@ -814,6 +837,7 @@ public class AtsService : IAtsService
         var workerId = await _repository.ResolverWorkerIdAsync(callerUserId);
 
         if (grupo.Estado is "Anulado" or "Reemplazado") throw new AbrilException($"Este ATS grupal está {grupo.Estado.ToLower()} — ya no se puede firmar.", 409);
+        if (grupo.Estado != "Cerrado") throw new AbrilException("Cierra la cuadrilla antes de validar: todavía puede sumarse gente.", 409);
         await ExigirSinObservacionesAbiertas(null, grupoId);
 
         // Cadena obligatoria: Capataz → Residente/Producción (Autoriza) → Visto Bueno SSOMA. Staff no lleva Capataz.
@@ -828,6 +852,8 @@ public class AtsService : IAtsService
                 : $"Se sumaron {estado.CapatazNuevosSinValidar} trabajador(es) después de la firma del Capataz/Maestro de obra. Debe volver a firmar antes de continuar.", 409);
         if (rol == "Ssoma" && estado.AutorizaFirmados < estado.EjecutantesFirmados)
             throw new AbrilException("Falta la firma del Residente/Producción (Autoriza) sobre toda la cuadrilla. Debe firmar antes del Visto Bueno SSOMA.", 409);
+        if (rol == "Ssoma")
+            await ExigirPetaresFirmadosParaSsoma(null, grupoId, estado.RequiereCapataz);
 
         var ids = await _repository.GetAtsIdsPendientesDeVisto(grupoId, rol, workerId, esAdmin);
         if (ids.Count == 0)
@@ -836,20 +862,75 @@ public class AtsService : IAtsService
         var body = new AtsFirmarVistoRequestDto(); // la firma sale de la firma digital registrada
         foreach (var atsId in ids)
             await FirmarVistoComun(atsId, callerUserId, esAdmin, body, rol);
+        if (rol == "Autoriza")
+            await AvisarNivel(grupo.ProyectoId, "Ssoma", $"/ssoma/gestion/ats/grupo/{grupoId}");
         return ids.Count;
     }
 
+    /// <summary>Cerrar la cuadrilla = declarar que ya se unieron todos. Recién ahí corre la cadena de validación
+    /// (Capataz → Residente/Producción → SSOMA). Cierran: su autor, el Capataz/Maestro, el Residente, Producción, SSOMA o un admin.
+    /// Al cerrar se avisa al primer nivel que debe firmar.</summary>
     public async Task CerrarGrupo(int id, int workerId, bool esAdmin)
     {
+        var grupo = await _repository.GetGrupoEntidad(id) ?? throw new AbrilException("ATS grupal no encontrado.", 404);
         if (!esAdmin && !await _repository.EsAutorDeGrupo(id, workerId))
-            throw new AbrilException("Este ATS grupal no te pertenece.", 403);
+        {
+            var (esResidente, esProduccion, esSsoma) = await RolesEnProyecto(grupo.ProyectoId, workerId);
+            if (!esResidente && !esProduccion && !esSsoma && !await _repository.EsCapatazDeProyecto(workerId, grupo.ProyectoId))
+                throw new AbrilException("Solo quien creó el ATS grupal, el Capataz/Maestro de obra, el Residente/Producción, SSOMA o un administrador pueden cerrarlo.", 403);
+        }
+        await EjecutarCierreGrupo(grupo, workerId);
+    }
+
+    /// <summary>El AUTOR de la cuadrilla, que no tiene cuenta (creó el ATS desde el QR de obra), la cierra desde su
+    /// página pública con el token + su nombre + dígitos de DNI; también puede cerrarla el Capataz/Maestro del proyecto. El resto cierra con su cuenta.</summary>
+    public async Task CerrarGrupoPublico(Guid token, AtsGrupoCerrarPublicoRequestDto body)
+    {
+        var grupo = await _repository.GetGrupoPorToken(token) ?? throw new AbrilException("Enlace inválido.", 404);
+        if (!await _repository.DniCoincide(body.WorkerId, body.DniConfirmacion))
+            throw new AbrilException("Los dígitos de DNI no coinciden con el trabajador seleccionado.", 400);
+        if (grupo.CreadoPorWorkerId != body.WorkerId
+            && !(await _repository.GetCapatacesDeProyecto(grupo.ProyectoId)).Any(c => c.WorkerId == body.WorkerId))
+            throw new AbrilException("Solo quien creó la cuadrilla o el Capataz/Maestro de obra del proyecto pueden cerrarla desde aquí.", 403);
+        await EjecutarCierreGrupo(grupo, body.WorkerId);
+    }
+
+    private async Task EjecutarCierreGrupo(SsAtsGrupo grupo, int workerId)
+    {
+        var id = grupo.Id;
+        if (grupo.Estado is "Anulado" or "Reemplazado")
+            throw new AbrilException($"Este ATS grupal está {grupo.Estado.ToLower()} — no se puede cerrar.", 409);
+        if (grupo.Estado == "Cerrado")
+            throw new AbrilException("Este ATS grupal ya está cerrado.", 409);
+
+        var estado = await _repository.GetEstadoGrupo(id);
+        if (estado is null || estado.EjecutantesFirmados == 0)
+            throw new AbrilException("Todavía no firmó ningún trabajador de la cuadrilla — no se puede cerrar.", 409);
+
         await _repository.CerrarGrupo(id);
         await _repository.AgregarEventoGrupo(id, "Cerrado", workerId, null);
+        await AvisarNivel(grupo.ProyectoId, estado.RequiereCapataz ? "Capataz" : "Autoriza", $"/ssoma/gestion/ats/grupo/{id}");
+    }
+
+    /// <summary>SSOMA firma al final: no puede dar el Visto Bueno del ATS mientras falten firmas previas en sus PETAR.</summary>
+    private async Task ExigirPetaresFirmadosParaSsoma(int? atsId, int? atsGrupoId, bool requiereCapataz)
+    {
+        var faltan = await _repository.GetPetaresSinValidacionPrevia(atsId, atsGrupoId, requiereCapataz);
+        if (faltan.Count > 0)
+            throw new AbrilException("No se puede dar el Visto Bueno SSOMA: faltan firmas en el PETAR — " + string.Join("; ", faltan) + ". SSOMA firma al final.", 409);
+    }
+
+    /// <summary>La validación solo corre con la cuadrilla cerrada: mientras esté abierta todavía puede sumarse gente.</summary>
+    private async Task ExigirGrupoCerrado(int grupoId)
+    {
+        var g = await _repository.GetGrupoEntidad(grupoId) ?? throw new AbrilException("ATS grupal no encontrado.", 404);
+        if (g.Estado != "Cerrado")
+            throw new AbrilException("Cierra la cuadrilla antes de validar: todavía puede sumarse gente.", 409);
     }
 
     /// <summary>Reabre un grupo cerrado el MISMO día (para sumar a alguien que faltó) — solo su autor o el admin,
-    /// y queda registrado quién lo hizo. Las firmas de la cadena ya dadas no se tocan: el nuevo adherido las deja
-    /// pendientes y el panel vuelve a habilitar los botones de firma.</summary>
+    /// y queda registrado quién lo hizo. Las firmas de VALIDACIÓN (Capataz, Autoriza, SSOMA, PETAR) se invalidan: hay que
+    /// volver a firmar sobre la cuadrilla final (quién había firmado queda en el evento).</summary>
     public async Task ReabrirGrupo(int grupoId, int workerId, bool esAdmin)
     {
         var grupo = await _repository.GetGrupoEntidad(grupoId) ?? throw new AbrilException("ATS grupal no encontrado.", 404);
@@ -866,8 +947,8 @@ public class AtsService : IAtsService
         if (grupo.Fecha != DateOnly.FromDateTime(DateTime.Today))
             throw new AbrilException("Solo se puede reabrir el mismo día. Si es otra jornada, crea un ATS grupal nuevo.", 409);
 
-        await _repository.ReabrirGrupo(grupoId, grupo.Fecha.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc));
-        await _repository.AgregarEventoGrupo(grupoId, "Reabierto", workerId, null);
+        var firmasInvalidadas = await _repository.ReabrirGrupo(grupoId, grupo.Fecha.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc));
+        await _repository.AgregarEventoGrupo(grupoId, "Reabierto", workerId, firmasInvalidadas);
     }
 
     /// <summary>Contenido del grupo con la forma de un ATS — para precargar el wizard al corregir (?corregirGrupo=id).</summary>
@@ -1295,11 +1376,11 @@ public class AtsService : IAtsService
             return new AtsGrupoCapatazPublicoDto { Valido = false, MotivoInvalido = "Este enlace no corresponde a ningún ATS grupal." };
         if (grupo.QrExpiraEn < DateTime.UtcNow)
             return new AtsGrupoCapatazPublicoDto { Valido = false, MotivoInvalido = "Este enlace venció — el ATS grupal era para otra jornada." };
-
         var estado = await _repository.GetEstadoGrupo(grupo.Id);
         return new AtsGrupoCapatazPublicoDto
         {
             Valido = true,
+            Abierta = grupo.Estado == "Activo",
             ProyectoNombre = grupo.Proyecto?.ProjectDescription,
             Actividad = grupo.Actividad,
             TrabajadoresAdheridos = estado?.TrabajadoresAdheridos ?? [],
@@ -1323,6 +1404,7 @@ public class AtsService : IAtsService
             throw new AbrilException("Solo el Capataz o Maestro de obra de este proyecto puede firmar este nivel.", 403);
 
         if (grupo.Estado is "Anulado" or "Reemplazado") throw new AbrilException($"Este ATS grupal está {grupo.Estado.ToLower()}.", 409);
+        if (grupo.Estado != "Cerrado") throw new AbrilException("Cierra la cuadrilla antes de validar: todavía puede sumarse gente.", 409);
         await ExigirSinObservacionesAbiertas(null, grupoId);
         var estado = await _repository.GetEstadoGrupo(grupoId);
         if (estado is not null && !estado.RequiereCapataz)
@@ -1339,6 +1421,7 @@ public class AtsService : IAtsService
         var firmaUrl = await SubirBytes("capatazgrupo", workerId, firmaBytes, "png");
 
         await _repository.FirmarCapatazGrupo(grupoId, workerId, nombre, cargo, firmaUrl, firmaHash, DateTime.UtcNow, null, null, null, null, null, null);
+        await AvisarNivel(grupo.ProyectoId, "Autoriza", $"/ssoma/gestion/ats/grupo/{grupoId}");
     }
 
     public async Task FirmarCapatazPublico(Guid token, AtsGrupoCapatazFirmarRequestDto body)
@@ -1351,6 +1434,7 @@ public class AtsService : IAtsService
             throw new AbrilException("Este enlace venció — el ATS grupal era para otra jornada.", 409);
 
         if (grupo.Estado is "Anulado" or "Reemplazado") throw new AbrilException($"Este ATS grupal está {grupo.Estado.ToLower()}.", 409);
+        if (grupo.Estado != "Cerrado") throw new AbrilException("La cuadrilla todavía está abierta: el autor debe cerrarla antes de que firmes.", 409);
         await ExigirSinObservacionesAbiertas(null, grupo.Id);
         var estado = await _repository.GetEstadoGrupo(grupo.Id);
         if (estado is not null && !estado.RequiereCapataz)
@@ -1378,6 +1462,7 @@ public class AtsService : IAtsService
 
         await _repository.FirmarCapatazGrupo(grupo.Id, body.WorkerId, nombre, cargo, firmaUrl, firmaHash, DateTime.UtcNow,
             selfieUrl, selfieHash, body.Lat, body.Lng, body.PrecisionMetros, body.HoraDispositivo);
+        await AvisarNivel(grupo.ProyectoId, "Autoriza", $"/ssoma/gestion/ats/grupo/{grupo.Id}");
     }
 
     // ── QR fijo por proyecto (crear ATS Grupal sin login) ──────────────────

@@ -47,7 +47,7 @@ public interface IAtsRepository
 
     /// <summary>Marca RequierePetar y llena Petares en cada dto — separado de ToDto porque cruza a
     /// ss_petar (otra feature) y a un chequeo de catálogo que no vale la pena repetir por fila.</summary>
-    Task CompletarInfoPetar(List<AtsResponseDto> ats, Dictionary<int, (bool EsResidente, bool EsSsoma)> permisosPorAtsId);
+    Task CompletarInfoPetar(List<AtsResponseDto> ats, Dictionary<int, (bool EsResidente, bool EsSsoma, bool EsCapataz)> permisosPorAtsId);
 
     Task<bool> TieneConsentimiento(int workerId);
     Task RegistrarConsentimiento(int workerId, string? ipOrigen);
@@ -77,6 +77,9 @@ public interface IAtsRepository
     /// <summary>true si el ejecutante del ATS es obrero de obra (no Staff/Oficina Central) — de
     /// esto depende si se exige la firma de Capataz.</summary>
     Task<bool> EsObreroDeObra(int workerId);
+    Task<List<string>> GetEmailsNivel(int proyectoId, string nivel);
+    Task<string?> GetCodigosPetar(int? atsId, int? atsGrupoId);
+    Task<List<string>> GetPetaresSinValidacionPrevia(int? atsId, int? atsGrupoId, bool requiereCapataz);
 
     /// <summary>Cualquier prevencionista de Abril (puesto "Prevencionista", ContrataCasa="Casa"),
     /// sin importar el proyecto — puede dar Visto Bueno SSOMA en cualquier ATS que no sea el suyo.</summary>
@@ -163,7 +166,7 @@ public interface IAtsRepository
     Task<int?> GetAtsIdDeGrupo(int atsGrupoId, int workerId, string estado);
     /// <summary>true si ya hay alguna validación de la cadena (Capataz/Autoriza/SSOMA) en la cuadrilla.</summary>
     Task<bool> GrupoTieneValidaciones(int atsGrupoId);
-    Task ReabrirGrupo(int atsGrupoId, DateTime nuevaExpiracionUtc);
+    Task<string?> ReabrirGrupo(int atsGrupoId, DateTime nuevaExpiracionUtc);
     Task AgregarEventoGrupo(int atsGrupoId, string evento, int? workerId, string? detalle);
     Task<string?> GetUltimoEventoGrupo(int atsGrupoId);
     Task<List<AtsGrupoIntegranteDto>> GetIntegrantes(int atsGrupoId);
