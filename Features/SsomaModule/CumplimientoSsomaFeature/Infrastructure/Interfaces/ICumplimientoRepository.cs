@@ -12,8 +12,9 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Infrastruc
         Task DeleteActividadAsync(int actividadId);
 
         // --- Cumplimiento por proyecto ---
-        Task<CumplimientoResumenDto> GetResumenProyectoAsync(int proyectoId, string? rol);
-        Task<CumplimientoItemDto> MarcarAsync(int proyectoId, int actividadId, CumplimientoMarcarDto dto, int? userId);
+        Task<CumplimientoResumenDto> GetResumenProyectoAsync(int proyectoId, int usuarioId, string? rol);
+        Task<CumplimientoItemDto> MarcarAsync(int proyectoId, int actividadId, CumplimientoMarcarDto dto, int userId);
+        Task<List<CumplimientoUsuarioDto>> GetUsuariosProyectoAsync(int proyectoId);
 
         // --- "Mi" checklist: resuelve rol + proyecto actual del usuario logueado ---
         Task<int?> GetProyectoActualDeUsuarioAsync(int userId);
@@ -21,6 +22,6 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Infrastruc
         Task<CumplimientoMiResumenDto> GetMiResumenAsync(int userId);
 
         // --- Histórico / indicadores ---
-        Task<CumplimientoHistoricoDto> GetHistoricoAsync(int proyectoId, string frecuencia, DateOnly desde, DateOnly hasta);
+        Task<CumplimientoHistoricoDto> GetHistoricoAsync(int proyectoId, int usuarioId, string frecuencia, DateOnly desde, DateOnly hasta);
     }
 }

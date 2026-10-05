@@ -5,9 +5,10 @@ using Abril_Backend.Shared.Models;
 namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Infrastructure.Models
 {
     // Registro de cumplimiento de una actividad, en un proyecto, para un periodo concreto
-    // (el día, el lunes de la semana, o el día 1 del mes, según la frecuencia de la actividad).
+    // (el día, el lunes de la semana, o el día 1 del mes, según la frecuencia de la actividad),
+    // POR USUARIO: cada prevencionista/coordinador del proyecto lleva su propio checklist.
     [Table("ss_cumplimiento_registro")]
-    [Index(nameof(ActividadId), nameof(ProyectoId), nameof(Periodo), IsUnique = true)]
+    [Index(nameof(ActividadId), nameof(ProyectoId), nameof(Periodo), nameof(UsuarioId), IsUnique = true)]
     public class SsCumplimientoRegistro
     {
         [Column("id")]
@@ -18,6 +19,11 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Infrastruc
 
         [Column("proyecto_id")]
         public int ProyectoId { get; set; }
+
+        // Dueño del registro (user_id del que lleva este checklist). Null solo en filas
+        // históricas que no tenían a nadie asignado; estas no se muestran a ningún usuario.
+        [Column("usuario_id")]
+        public int? UsuarioId { get; set; }
 
         // Fecha que representa el periodo: el día (diaria), el lunes (semanal) o el día 1 (mensual)
         [Column("periodo")]

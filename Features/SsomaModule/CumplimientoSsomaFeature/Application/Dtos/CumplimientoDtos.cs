@@ -62,6 +62,15 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Applicatio
         public List<CumplimientoItemDto> Actividades { get; set; } = new();
     }
 
+    // Usuario cuyo checklist se puede consultar en un proyecto (prevencionista o coordinador).
+    public class CumplimientoUsuarioDto
+    {
+        public int UserId { get; set; }
+        public string Nombre { get; set; } = "";
+        // "coordinador_ssoma" | "prevencionista"
+        public string Rol { get; set; } = "prevencionista";
+    }
+
     public class CumplimientoMarcarDto
     {
         // "cumplido" | "no_aplica" | "pendiente" (pendiente = desmarcar)

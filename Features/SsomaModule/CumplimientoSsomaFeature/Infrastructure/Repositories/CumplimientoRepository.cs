@@ -122,7 +122,9 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Infrastruc
         // CUMPLIMIENTO POR PROYECTO
         // ─────────────────────────────────────────────────────────────────
 
-        public async Task<CumplimientoResumenDto> GetResumenProyectoAsync(int proyectoId, string? rol)
+        // Checklist de UN usuario en un proyecto: cada prevencionista/coordinador lleva el suyo,
+        // los registros de otros usuarios del mismo proyecto no se mezclan.
+        public async Task<CumplimientoResumenDto> GetResumenProyectoAsync(int proyectoId, int usuarioId, string? rol)
         {
             using var ctx = _factory.CreateDbContext();
 
@@ -133,7 +135,7 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Infrastruc
                 .ToListAsync();
 
             var registros = await ctx.SsCumplimientoRegistro
-                .Where(r => r.ProyectoId == proyectoId)
+                .Where(r => r.ProyectoId == proyectoId && r.UsuarioId == usuarioId)
                 .ToListAsync();
 
             var cumplidoPorIds = registros
@@ -172,7 +174,7 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Infrastruc
             return new CumplimientoResumenDto { ProyectoId = proyectoId, Actividades = items };
         }
 
-        public async Task<CumplimientoItemDto> MarcarAsync(int proyectoId, int actividadId, CumplimientoMarcarDto dto, int? userId)
+        public async Task<CumplimientoItemDto> MarcarAsync(int proyectoId, int actividadId, CumplimientoMarcarDto dto, int userId)
         {
             using var ctx = _factory.CreateDbContext();
 
@@ -184,7 +186,7 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Infrastruc
             var estado = dto.Estado is "cumplido" or "no_aplica" or "pendiente" ? dto.Estado : "pendiente";
 
             var registro = await ctx.SsCumplimientoRegistro
-                .FirstOrDefaultAsync(r => r.ActividadId == actividadId && r.ProyectoId == proyectoId && r.Periodo == periodo);
+                .FirstOrDefaultAsync(r => r.ActividadId == actividadId && r.ProyectoId == proyectoId && r.Periodo == periodo && r.UsuarioId == userId);
 
             if (registro == null)
             {
@@ -192,6 +194,7 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Infrastruc
                 {
                     ActividadId = actividadId,
                     ProyectoId  = proyectoId,
+                    UsuarioId   = userId,
                     Periodo     = periodo,
                     CreatedAt   = now
                 };
@@ -301,7 +304,7 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Infrastruc
                 .Select(p => p.ProjectDescription)
                 .FirstOrDefaultAsync() ?? "";
 
-            var resumen = await GetResumenProyectoAsync(proyectoId.Value, rol);
+            var resumen = await GetResumenProyectoAsync(proyectoId.Value, userId, rol);
 
             return new CumplimientoMiResumenDto
             {
@@ -312,6 +315,65 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Infrastruc
             };
         }
 
+        // Prevencionistas y coordinadores SSOMA cuyo proyecto actual es este (misma resolución
+        // que GetProyectoActualDeUsuarioAsync, pero en bloque), para que el coordinador elija
+        // de quién ver el checklist en "Por Proyecto" e "Histórico".
+        public async Task<List<CumplimientoUsuarioDto>> GetUsuariosProyectoAsync(int proyectoId)
+        {
+            using var ctx = _factory.CreateDbContext();
+
+            var candidatos = await ctx.Person
+                .Where(p => p.UserId != null)
+                .Join(
+                    ctx.Worker.Where(w => w.State
+                        && (w.PuestoCatalogo!.CategoriaId == CategoriaIds.Prevencionista
+                            || w.PuestoCatalogo!.CategoriaId == CategoriaIds.CoordinadorSsoma)),
+                    p => p.PersonId, w => w.PersonId,
+                    (p, w) => new
+                    {
+                        WorkerId = w.Id,
+                        UserId = p.UserId!.Value,
+                        Nombre = p.FullName,
+                        CategoriaId = w.PuestoCatalogo!.CategoriaId
+                    })
+                .ToListAsync();
+
+            var workerIds = candidatos.Select(c => c.WorkerId).ToList();
+
+            var asignaciones = await ctx.WorkerProyecto
+                .Where(wp => workerIds.Contains(wp.WorkerId) && wp.FechaFin == null)
+                .ToListAsync();
+            var vinculaciones = await ctx.WorkerVinculacion
+                .Where(v => workerIds.Contains(v.WorkerId) && v.FechaFin == null)
+                .ToListAsync();
+
+            var resultado = new List<CumplimientoUsuarioDto>();
+            foreach (var c in candidatos)
+            {
+                var proyectoActual = asignaciones
+                    .Where(wp => wp.WorkerId == c.WorkerId)
+                    .OrderByDescending(wp => wp.FechaInicio).ThenByDescending(wp => wp.Id)
+                    .Select(wp => (int?)wp.ProyectoId)
+                    .FirstOrDefault()
+                    ?? vinculaciones
+                        .Where(v => v.WorkerId == c.WorkerId)
+                        .OrderByDescending(v => v.CreatedAt).ThenByDescending(v => v.Id)
+                        .Select(v => (int?)v.ProyectoId)
+                        .FirstOrDefault();
+
+                if (proyectoActual != proyectoId) continue;
+
+                resultado.Add(new CumplimientoUsuarioDto
+                {
+                    UserId = c.UserId,
+                    Nombre = c.Nombre ?? "",
+                    Rol = c.CategoriaId == CategoriaIds.CoordinadorSsoma ? "coordinador_ssoma" : "prevencionista"
+                });
+            }
+
+            return resultado.OrderBy(u => u.Nombre).ToList();
+        }
+
         // ─────────────────────────────────────────────────────────────────
         // HISTÓRICO / INDICADORES
         // ─────────────────────────────────────────────────────────────────
@@ -320,15 +382,19 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Infrastruc
         // vigentes y cómo terminaron. Un día sin ninguna fila creada (nadie marcó nada
         // ese día) igual aparece con Total = actividades activas de esa frecuencia y
         // Pendientes = Total, para que el histórico no tenga huecos.
-        public async Task<CumplimientoHistoricoDto> GetHistoricoAsync(int proyectoId, string frecuencia, DateOnly desde, DateOnly hasta)
+        public async Task<CumplimientoHistoricoDto> GetHistoricoAsync(int proyectoId, int usuarioId, string frecuencia, DateOnly desde, DateOnly hasta)
         {
+            // El total son solo las actividades que le tocan a ese usuario según su puesto.
+            var rol = await GetRolDeUsuarioAsync(usuarioId);
+
             using var ctx = _factory.CreateDbContext();
 
             var totalActividades = await ctx.SsCumplimientoActividad
-                .CountAsync(a => a.Activo && a.Frecuencia == frecuencia);
+                .CountAsync(a => a.Activo && a.Frecuencia == frecuencia
+                              && (rol == null || a.RolResponsable == rol || a.RolResponsable == "ambos"));
 
             var registros = await ctx.SsCumplimientoRegistro
-                .Where(r => r.ProyectoId == proyectoId && r.Periodo >= desde && r.Periodo <= hasta)
+                .Where(r => r.ProyectoId == proyectoId && r.UsuarioId == usuarioId && r.Periodo >= desde && r.Periodo <= hasta)
                 .Join(ctx.SsCumplimientoActividad.Where(a => a.Frecuencia == frecuencia),
                       r => r.ActividadId, a => a.Id, (r, a) => r)
                 .ToListAsync();
