@@ -14,9 +14,12 @@ namespace Abril_Backend.Shared.Services.Notificaciones.Services
         /// <summary>Máximo de notificaciones que devuelve el panel (las más recientes).</summary>
         private const int MaxNotificacionesPanel = 50;
 
-        public NotificacionesService(IDbContextFactory<AppDbContext> factory)
+        private readonly Abril_Backend.Shared.Services.Push.IPushService _push;
+
+        public NotificacionesService(IDbContextFactory<AppDbContext> factory, Abril_Backend.Shared.Services.Push.IPushService push)
         {
             _factory = factory;
+            _push = push;
         }
 
         public async Task CrearPorCorreosAsync(
@@ -86,6 +89,11 @@ namespace Abril_Backend.Shared.Services.Notificaciones.Services
             }
 
             await ctx.SaveChangesAsync();
+
+            // Mismo aviso como popup al celular (Web Push) — best-effort, un fallo no afecta la campanita.
+            var primero = items.First();
+            var cuerpo = string.IsNullOrWhiteSpace(primero.Descripcion) ? primero.Subtitulo : primero.Descripcion;
+            await _push.EnviarAsync(userIds, primero.Titulo, cuerpo ?? string.Empty, primero.Referencia);
         }
 
         public async Task<NotificacionesDto> GetMisNotificaciones(int userId)

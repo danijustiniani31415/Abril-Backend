@@ -9,10 +9,11 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Applicatio
         Task UpdateActividadAsync(int actividadId, CumplimientoActividadUpsertDto dto);
         Task DeleteActividadAsync(int actividadId);
 
-        Task<CumplimientoResumenDto> GetResumenProyectoAsync(int proyectoId, string? rol);
-        Task<CumplimientoItemDto> MarcarAsync(int proyectoId, int actividadId, CumplimientoMarcarDto dto, int? userId);
+        Task<CumplimientoResumenDto> GetResumenProyectoAsync(int proyectoId, int usuarioId);
+        Task<CumplimientoItemDto> MarcarAsync(int proyectoId, int actividadId, CumplimientoMarcarDto dto, int userId);
+        Task<List<CumplimientoUsuarioDto>> GetUsuariosProyectoAsync(int proyectoId);
 
         Task<CumplimientoMiResumenDto> GetMiResumenAsync(int userId);
-        Task<CumplimientoHistoricoDto> GetHistoricoAsync(int proyectoId, string frecuencia, DateOnly desde, DateOnly hasta);
+        Task<CumplimientoHistoricoDto> GetHistoricoAsync(int proyectoId, int usuarioId, string frecuencia, DateOnly desde, DateOnly hasta);
     }
 }

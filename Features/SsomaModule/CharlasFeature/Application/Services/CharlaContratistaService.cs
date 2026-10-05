@@ -35,7 +35,7 @@ public class CharlaContratistaService : ICharlaContratistaService
 
         var proyectoIds = tareados.Select(t => t.ProyectoId).Distinct().ToList();
         var subidas = await ctx.SsCharlaContratista
-            .Where(c => c.State && c.EmpresaId == empresaId && c.Fecha == fecha && proyectoIds.Contains(c.ProyectoId))
+            .Where(c => c.State && c.Estado != "Rechazado" && c.EmpresaId == empresaId && c.Fecha == fecha && proyectoIds.Contains(c.ProyectoId))
             .ToDictionaryAsync(c => c.ProyectoId, c => c.Id);
 
         return tareados
@@ -70,7 +70,7 @@ public class CharlaContratistaService : ICharlaContratistaService
         if (tareados.Count == 0) return new List<CharlaContratistaPendienteDto>();
 
         var subidas = await ctx.SsCharlaContratista
-            .Where(c => c.State && c.EmpresaId == empresaId && c.Fecha < hoy)
+            .Where(c => c.State && c.Estado != "Rechazado" && c.EmpresaId == empresaId && c.Fecha < hoy)
             .Select(c => new { c.ProyectoId, c.Fecha })
             .ToListAsync();
         var subidasSet = subidas.Select(s => (s.ProyectoId, s.Fecha)).ToHashSet();
@@ -151,9 +151,12 @@ public class CharlaContratistaService : ICharlaContratistaService
         if (!fueTareado)
             throw new AbrilException("Tu empresa no fue tareada en ese proyecto para la fecha indicada.", 400);
 
-        var yaExiste = await ctx.SsCharlaContratista.AnyAsync(c =>
+        var existente = await ctx.SsCharlaContratista.FirstOrDefaultAsync(c =>
             c.State && c.EmpresaId == empresaId && c.ProyectoId == req.ProyectoId && c.Fecha == fecha);
-        if (yaExiste)
+        // Una charla rechazada no cuenta como cumplida: se permite volver a subirla.
+        // La rechazada se desactiva (queda en el historial) porque el índice único
+        // ux_ss_charla_contratista_unica_dia solo admite una charla activa por día.
+        if (existente != null && existente.Estado != "Rechazado")
             throw new AbrilException("Ya registraste la charla de ese día para este proyecto.", 400);
 
         string? evidenciaUrl = null;
@@ -181,8 +184,15 @@ public class CharlaContratistaService : ICharlaContratistaService
             EvidenciaNombre = req.EvidenciaNombre,
             SubidoPorUserId = userId,
         };
+        await using var tx = await ctx.Database.BeginTransactionAsync();
+        if (existente != null)
+        {
+            existente.State = false;
+            await ctx.SaveChangesAsync();
+        }
         ctx.SsCharlaContratista.Add(entidad);
         await ctx.SaveChangesAsync();
+        await tx.CommitAsync();
 
         var proyectoNombre = await ctx.Project
             .Where(p => p.ProjectId == req.ProyectoId)

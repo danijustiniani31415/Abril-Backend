@@ -17,6 +17,8 @@ public interface IOptRepository
     Task<List<OptPetDto>> GetPetsAsync();
     Task<List<OptCriterioVerificacionDto>> GetCriteriosVerificacionAsync();
     Task UpdateFirmasAsync(int optId, string? firmaObservadorUrl, Dictionary<int, string> firmasTrabajadorUrls, List<string> fotosAreaUrls);
+    Task EliminarBorradorAsync(int id);
+    Task<int> PurgarBorradoresAsync(DateTime limiteUtc);
     Task ActualizarOptAsync(int id, CrearOptRequest request, string? firmaObservadorUrlNueva,
         Dictionary<int, string> firmasTrabajadorUrlsNuevas, List<string> fotosAreaUrlsNuevas);
 }

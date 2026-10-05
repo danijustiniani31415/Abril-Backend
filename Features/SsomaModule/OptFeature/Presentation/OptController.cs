@@ -170,4 +170,25 @@ public class OptController : ControllerBase
             return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." });
         }
     }
+
+    // Descarta un borrador (a medio llenar). Una OPT finalizada nunca se puede eliminar.
+    [HttpDelete("{id:int}")]
+    [RequireFeature("ssoma.gestion.opt.nuevo")]
+    public async Task<IActionResult> EliminarBorrador(int id)
+    {
+        try
+        {
+            await _service.EliminarBorradorAsync(id);
+            return NoContent();
+        }
+        catch (AbrilException ex)
+        {
+            return StatusCode(ex.StatusCode, new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error en OptController.EliminarBorrador");
+            return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." });
+        }
+    }
 }

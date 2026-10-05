@@ -596,6 +596,56 @@ public class OptRepository : IOptRepository
         await ctx.SaveChangesAsync();
     }
 
+    // Solo un borrador se puede descartar — una OPT finalizada es registro oficial y
+    // nunca se borra desde acá.
+    public async Task EliminarBorradorAsync(int id)
+    {
+        using var ctx = _factory.CreateDbContext();
+        var opt = await ctx.SsomaOpt
+            .Include(o => o.Trabajadores)
+            .Include(o => o.Verificaciones)
+            .Include(o => o.Pasos)
+            .Include(o => o.FotosArea)
+            .FirstOrDefaultAsync(o => o.Id == id)
+            ?? throw new AbrilException("OPT no encontrada.", 404);
+
+        if (opt.Estado != "borrador")
+            throw new AbrilException("Solo se pueden eliminar OPT en borrador.", 400);
+
+        ctx.SsomaOptTrabajador.RemoveRange(opt.Trabajadores);
+        ctx.SsomaOptVerificacion.RemoveRange(opt.Verificaciones);
+        ctx.SsomaOptPaso.RemoveRange(opt.Pasos);
+        ctx.SsomaOptFotoArea.RemoveRange(opt.FotosArea);
+        ctx.SsomaOpt.Remove(opt);
+        await ctx.SaveChangesAsync();
+    }
+
+    // Limpieza automática: borradores creados antes de `limiteUtc` que nunca se
+    // finalizaron. Devuelve cuántos se eliminaron.
+    public async Task<int> PurgarBorradoresAsync(DateTime limiteUtc)
+    {
+        using var ctx = _factory.CreateDbContext();
+        var viejos = await ctx.SsomaOpt
+            .Where(o => o.Estado == "borrador" && o.CreatedAt < limiteUtc)
+            .Include(o => o.Trabajadores)
+            .Include(o => o.Verificaciones)
+            .Include(o => o.Pasos)
+            .Include(o => o.FotosArea)
+            .ToListAsync();
+        if (viejos.Count == 0) return 0;
+
+        foreach (var opt in viejos)
+        {
+            ctx.SsomaOptTrabajador.RemoveRange(opt.Trabajadores);
+            ctx.SsomaOptVerificacion.RemoveRange(opt.Verificaciones);
+            ctx.SsomaOptPaso.RemoveRange(opt.Pasos);
+            ctx.SsomaOptFotoArea.RemoveRange(opt.FotosArea);
+        }
+        ctx.SsomaOpt.RemoveRange(viejos);
+        await ctx.SaveChangesAsync();
+        return viejos.Count;
+    }
+
     public async Task<OptDashboardDto> GetDashboardAsync(int? proyectoId, int? anio, int? empresaIdContratista = null)
     {
         using var ctx = _factory.CreateDbContext();

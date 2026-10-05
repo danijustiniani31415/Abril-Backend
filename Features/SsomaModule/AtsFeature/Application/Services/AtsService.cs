@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Processing;
 using Abril_Backend.Application.Exceptions;
 using Abril_Backend.Features.AuthModule.UserFeature.Application.Dtos;
 using Abril_Backend.Features.AuthModule.UserFeature.Application.Interfaces;
@@ -295,7 +297,22 @@ public class AtsService : IAtsService
             var (_, proyectoActualId) = await _repository.GetPuestoYProyectoActual(workerId);
             filtro.ProyectoId = proyectoActualId;
         }
-        return await _repository.ListarGrupos(filtro);
+        var res = await _repository.ListarGrupos(filtro);
+
+        // Permisos de firma por cuadrilla (mismo criterio que GetEstadoGrupo) — se resuelven una vez por proyecto.
+        var rolesPorProyecto = new Dictionary<int, (bool EsResidente, bool EsProduccion, bool EsSsoma)>();
+        foreach (var g in res.Data)
+        {
+            if (!rolesPorProyecto.TryGetValue(g.ProyectoId, out var roles))
+                rolesPorProyecto[g.ProyectoId] = roles = await RolesEnProyecto(g.ProyectoId, workerId);
+            var abierto = g.Estado is not ("Anulado" or "Reemplazado");
+            // La validación solo corre con la cuadrilla CERRADA (cierre manual del autor/Capataz/Residente/Producción/SSOMA).
+            var validable = g.Estado == "Cerrado";
+            g.PuedeAutorizar = validable && (esAdmin || roles.EsResidente || roles.EsProduccion) && g.AutorizaFirmados < g.EjecutantesFirmados;
+            g.PuedeVistoBuenoSsoma = validable && (esAdmin || roles.EsSsoma) && g.SsomaFirmados < g.EjecutantesFirmados;
+            if (!abierto || !g.RequiereCapataz || g.CapatazVigente) g.CapatazLinkToken = null;
+        }
+        return res;
     }
 
     public async Task<AtsListaInitDto> GetListaInit(int workerId) =>
@@ -1342,6 +1359,7 @@ public class AtsService : IAtsService
             var destinatarios = new List<string>();
             if (!string.IsNullOrWhiteSpace(responsables.ResidenteEmail)) destinatarios.Add(responsables.ResidenteEmail);
             destinatarios.AddRange(responsables.SsomaEmails);
+            destinatarios.AddRange(await _repository.GetEmailsAvisoCadena(grupo.ProyectoId));
             if (grupo.CapatazFirmaUrl != null && grupo.CapatazWorkerId.HasValue)
             {
                 var emailCapataz = await _repository.GetEmailPersonalAutorizacion(grupo.CapatazWorkerId.Value);
@@ -1571,6 +1589,7 @@ public class AtsService : IAtsService
             var destinatarios = new List<string>();
             if (!string.IsNullOrWhiteSpace(responsables.ResidenteEmail)) destinatarios.Add(responsables.ResidenteEmail);
             destinatarios.AddRange(responsables.SsomaEmails);
+            destinatarios.AddRange(await _repository.GetEmailsAvisoCadena(grupo.ProyectoId));
             if (destinatarios.Count > 0)
                 await _notificacionesService.CrearPorCorreosAsync(
                     "ATS_PENDIENTE_FIRMA",
@@ -1618,16 +1637,54 @@ public class AtsService : IAtsService
         return urls[0];
     }
 
+    // Un solo HttpClient para todos los PDF (crear uno por imagen agotaba sockets y repetía el handshake) y caché
+    // en memoria: las URLs de selfie/firma son inmutables, así el PDF de una cuadrilla grande no vuelve a bajar
+    // y reducir decenas de imágenes cada vez que se abre la vista previa.
+    private static readonly HttpClient _httpImagenes = new() { Timeout = TimeSpan.FromSeconds(20) };
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte[]> _cacheImagenes = new();
+    private const int MaxImagenesEnCache = 400;
+    private const int LadoMaxImagenPdf = 640;
+
     private static async Task<byte[]?> DescargarBytes(string url)
     {
+        if (_cacheImagenes.TryGetValue(url, out var cacheado)) return cacheado;
         try
         {
-            using var http = new HttpClient();
-            return await http.GetByteArrayAsync(url);
+            var bytes = await _httpImagenes.GetByteArrayAsync(url);
+            bytes = ReducirImagen(bytes);
+            if (_cacheImagenes.Count >= MaxImagenesEnCache) _cacheImagenes.Clear();
+            _cacheImagenes[url] = bytes;
+            return bytes;
         }
         catch
         {
             return null;
+        }
+    }
+
+    /// <summary>Las selfies llegan del celular a resolución completa (varios MB): en el PDF se ven igual a 640 px y
+    /// QuestPDF tarda mucho menos en incrustarlas. Si no se puede procesar, se usa la imagen original.</summary>
+    private static byte[] ReducirImagen(byte[] original)
+    {
+        try
+        {
+            if (original.Length < 60_000) return original;
+            using var img = SixLabors.ImageSharp.Image.Load(original);
+            var formato = img.Metadata.DecodedImageFormat;
+            if (img.Width <= LadoMaxImagenPdf && img.Height <= LadoMaxImagenPdf) return original;
+            img.Mutate(x => x.Resize(new SixLabors.ImageSharp.Processing.ResizeOptions
+            {
+                Size = new SixLabors.ImageSharp.Size(LadoMaxImagenPdf, LadoMaxImagenPdf),
+                Mode = SixLabors.ImageSharp.Processing.ResizeMode.Max,
+            }));
+            using var ms = new MemoryStream();
+            if (formato is SixLabors.ImageSharp.Formats.Png.PngFormat) img.SaveAsPng(ms);
+            else img.SaveAsJpeg(ms, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 80 });
+            return ms.ToArray();
+        }
+        catch
+        {
+            return original;
         }
     }
 }

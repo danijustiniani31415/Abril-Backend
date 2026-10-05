@@ -95,6 +95,9 @@ public interface IAtsRepository
 
     Task<string?> GetEmailDeUsuario(int userId);
     Task<string?> GetEmailCorporativoWorker(int workerId);
+    /// <summary>Correos de quienes deben enterarse (popup al celular) de un ATS/PETAR pendiente de firma: todos los
+    /// prevencionistas de Abril + Ing./Arq. de Producción vigentes del proyecto.</summary>
+    Task<List<string>> GetEmailsAvisoCadena(int proyectoId);
 
     Task<(string Nombre, string? Dni)> GetNombreYDni(int workerId);
 

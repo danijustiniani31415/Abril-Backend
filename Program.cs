@@ -214,6 +214,7 @@ builder.Services.AddAuthModule(builder.Configuration);
 builder.Services.AddSsomaModule();
 builder.Services.AddHostedService<Abril_Backend.Features.SsomaModule.IndicadoresProactivosFeature.Infrastructure.SsomaIndicadoresCacheWarmup>();
 builder.Services.AddHostedService<Abril_Backend.Features.SsomaModule.AtsFeature.Infrastructure.AtsCierreRecordatorioService>();
+builder.Services.AddHostedService<Abril_Backend.Features.SsomaModule.OptFeature.Infrastructure.OptBorradoresPurgeService>();
 builder.Services.AddGestionAdministrativaModule();
 builder.Services.AddGestionGthModule();
 builder.Services.AddNotificacionesModule();

@@ -38,16 +38,23 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Applicatio
         public Task DeleteActividadAsync(int actividadId)
             => _repo.DeleteActividadAsync(actividadId);
 
-        public Task<CumplimientoResumenDto> GetResumenProyectoAsync(int proyectoId, string? rol)
-            => _repo.GetResumenProyectoAsync(proyectoId, rol);
+        // El rol se deduce del puesto del usuario consultado, no se recibe del cliente.
+        public async Task<CumplimientoResumenDto> GetResumenProyectoAsync(int proyectoId, int usuarioId)
+        {
+            var rol = await _repo.GetRolDeUsuarioAsync(usuarioId);
+            return await _repo.GetResumenProyectoAsync(proyectoId, usuarioId, rol);
+        }
 
-        public Task<CumplimientoItemDto> MarcarAsync(int proyectoId, int actividadId, CumplimientoMarcarDto dto, int? userId)
+        public Task<CumplimientoItemDto> MarcarAsync(int proyectoId, int actividadId, CumplimientoMarcarDto dto, int userId)
             => _repo.MarcarAsync(proyectoId, actividadId, dto, userId);
+
+        public Task<List<CumplimientoUsuarioDto>> GetUsuariosProyectoAsync(int proyectoId)
+            => _repo.GetUsuariosProyectoAsync(proyectoId);
 
         public Task<CumplimientoMiResumenDto> GetMiResumenAsync(int userId)
             => _repo.GetMiResumenAsync(userId);
 
-        public Task<CumplimientoHistoricoDto> GetHistoricoAsync(int proyectoId, string frecuencia, DateOnly desde, DateOnly hasta)
-            => _repo.GetHistoricoAsync(proyectoId, frecuencia, desde, hasta);
+        public Task<CumplimientoHistoricoDto> GetHistoricoAsync(int proyectoId, int usuarioId, string frecuencia, DateOnly desde, DateOnly hasta)
+            => _repo.GetHistoricoAsync(proyectoId, usuarioId, frecuencia, desde, hasta);
     }
 }

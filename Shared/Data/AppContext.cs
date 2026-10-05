@@ -72,6 +72,7 @@ namespace Abril_Backend.Infrastructure.Data
         public DbSet<MilestoneSchedule> MilestoneSchedule { get; set; }
         public DbSet<MilestoneScheduleHistory> MilestoneScheduleHistory { get; set; }
         public DbSet<Notificacion> Notificacion { get; set; }
+        public DbSet<PushSuscripcion> PushSuscripcion { get; set; }
         public DbSet<NotificacionTipo> NotificacionTipo { get; set; }
         public DbSet<Person> Person { get; set; }
         /// <summary>
@@ -2310,6 +2311,13 @@ namespace Abril_Backend.Infrastructure.Data
                  .WithMany()
                  .HasForeignKey(n => n.OrigenUserId)
                  .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            modelBuilder.Entity<PushSuscripcion>(e =>
+            {
+                e.HasIndex(x => x.Endpoint).IsUnique();
+                e.HasIndex(x => x.UserId);
+                e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             });
 
             // ── Planeamiento BIM ─────────────────────────────────────────────

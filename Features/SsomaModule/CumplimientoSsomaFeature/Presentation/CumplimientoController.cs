@@ -72,21 +72,31 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Presentati
         // CUMPLIMIENTO POR PROYECTO
         // ─────────────────────────────────────────────────────────────────
 
-        /// <summary>Estado de cumplimiento del periodo vigente (día/semana/mes según cada actividad) para un proyecto.</summary>
-        [HttpGet("proyecto/{proyectoId:int}/resumen")]
-        public async Task<IActionResult> GetResumen(int proyectoId, [FromQuery] string? rol)
+        /// <summary>Prevencionistas y coordinadores SSOMA del proyecto, para elegir de quién ver el checklist.</summary>
+        [HttpGet("proyecto/{proyectoId:int}/usuarios")]
+        public async Task<IActionResult> GetUsuarios(int proyectoId)
         {
-            try { return Ok(await _service.GetResumenProyectoAsync(proyectoId, rol)); }
+            try { return Ok(await _service.GetUsuariosProyectoAsync(proyectoId)); }
             catch (Exception) { return StatusCode(500, new { message = "Error del servidor." }); }
         }
 
-        /// <summary>Marca (cumplido/no aplica) o desmarca (pendiente) una actividad en el periodo vigente.</summary>
+        /// <summary>Estado de cumplimiento del periodo vigente (día/semana/mes según cada actividad) del checklist de un usuario en un proyecto.</summary>
+        [HttpGet("proyecto/{proyectoId:int}/resumen")]
+        public async Task<IActionResult> GetResumen(int proyectoId, [FromQuery] int usuarioId)
+        {
+            try { return Ok(await _service.GetResumenProyectoAsync(proyectoId, usuarioId)); }
+            catch (Exception) { return StatusCode(500, new { message = "Error del servidor." }); }
+        }
+
+        /// <summary>Marca (cumplido/no aplica) o desmarca (pendiente) una actividad en el periodo vigente, siempre en el checklist del usuario logueado.</summary>
         [HttpPatch("proyecto/{proyectoId:int}/actividades/{actividadId:int}")]
         public async Task<IActionResult> Marcar(int proyectoId, int actividadId, [FromBody] CumplimientoMarcarDto dto)
         {
             try
             {
-                var result = await _service.MarcarAsync(proyectoId, actividadId, dto, GetUserId());
+                var userId = GetUserId();
+                if (userId == null) return Unauthorized();
+                var result = await _service.MarcarAsync(proyectoId, actividadId, dto, userId.Value);
                 return Ok(result);
             }
             catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
@@ -108,9 +118,9 @@ namespace Abril_Backend.Features.SsomaModule.CumplimientoSsomaFeature.Presentati
 
         /// <summary>Histórico de cumplimiento (% por día/semana/mes) de un proyecto, para indicadores.</summary>
         [HttpGet("proyecto/{proyectoId:int}/historico")]
-        public async Task<IActionResult> GetHistorico(int proyectoId, [FromQuery] string frecuencia, [FromQuery] DateOnly desde, [FromQuery] DateOnly hasta)
+        public async Task<IActionResult> GetHistorico(int proyectoId, [FromQuery] int usuarioId, [FromQuery] string frecuencia, [FromQuery] DateOnly desde, [FromQuery] DateOnly hasta)
         {
-            try { return Ok(await _service.GetHistoricoAsync(proyectoId, frecuencia, desde, hasta)); }
+            try { return Ok(await _service.GetHistoricoAsync(proyectoId, usuarioId, frecuencia, desde, hasta)); }
             catch (Exception) { return StatusCode(500, new { message = "Error del servidor." }); }
         }
     }
