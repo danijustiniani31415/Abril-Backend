@@ -31,6 +31,10 @@ using Abril_Backend.Features.SsomaModule.AtsFeature.Application.Interfaces;
 using Abril_Backend.Features.SsomaModule.AtsFeature.Application.Services;
 using Abril_Backend.Features.SsomaModule.AtsFeature.Infrastructure.Interfaces;
 using Abril_Backend.Features.SsomaModule.AtsFeature.Infrastructure.Repositories;
+using Abril_Backend.Features.SsomaModule.InduccionFeature.Application.Interfaces;
+using Abril_Backend.Features.SsomaModule.InduccionFeature.Application.Services;
+using Abril_Backend.Features.SsomaModule.InduccionFeature.Infrastructure.Interfaces;
+using Abril_Backend.Features.SsomaModule.InduccionFeature.Infrastructure.Repositories;
 using Abril_Backend.Features.SsomaModule.PetarFeature.Application.Interfaces;
 using Abril_Backend.Features.SsomaModule.PetarFeature.Application.Services;
 using Abril_Backend.Features.SsomaModule.PetarFeature.Infrastructure.Interfaces;
@@ -262,6 +266,21 @@ namespace Abril_Backend.Features.Ssoma
             // con selfie + geolocalización + firma como evidencia de trazabilidad.
             services.AddScoped<IAtsRepository, AtsRepository>();
             services.AddScoped<IAtsService, AtsService>();
+
+            // Inducción digital — reemplaza SSO-FO-118/119/031/091 y GTH-FO-17: sesión con QR, entrega de
+            // documentos versionados, evaluación, firma (selfie + GPS) y acta PDF inmutable.
+            services.AddScoped<IInduccionRepository, InduccionRepository>();
+            services.AddScoped<IInduccionService, InduccionService>();
+            services.AddScoped<IInduccionActaPdfService, InduccionActaPdfService>();
+            // Fase 2: sello de tiempo externo (RFC 3161) + respaldo en otra cuenta; reintentos en segundo plano.
+            services.AddScoped<IInduccionPostCierreRepository, InduccionPostCierreRepository>();
+            services.AddScoped<IInduccionSelloService, InduccionSelloService>();
+            services.AddScoped<IInduccionRespaldoService, InduccionRespaldoService>();
+            // Fase 3: vigencia anual, re-aceptación por cambio material, bloqueo del ATS (apagado por defecto), expediente.
+            services.AddScoped<IInduccionVigenciaRepository, InduccionVigenciaRepository>();
+            services.AddScoped<IInduccionVigenciaService, InduccionVigenciaService>();
+            services.AddHostedService<Abril_Backend.Features.SsomaModule.InduccionFeature.Infrastructure.InduccionAlertaService>();
+            services.AddHostedService<Abril_Backend.Features.SsomaModule.InduccionFeature.Infrastructure.InduccionPostCierreService>();
 
             // PETAR — Permiso Escrito de Trabajo de Alto Riesgo, enlazado al ATS que lo origina.
             services.AddScoped<IPetarRepository, PetarRepository>();

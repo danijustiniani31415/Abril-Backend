@@ -8,6 +8,7 @@ using Abril_Backend.Features.SsomaModule.AtsFeature.Application.Dtos;
 using Abril_Backend.Features.SsomaModule.AtsFeature.Application.Interfaces;
 using Abril_Backend.Features.SsomaModule.AtsFeature.Infrastructure.Interfaces;
 using Abril_Backend.Features.SsomaModule.AtsFeature.Infrastructure.Models;
+using Abril_Backend.Features.SsomaModule.InduccionFeature.Application.Interfaces;
 using Abril_Backend.Infrastructure.Interfaces;
 using Abril_Backend.Shared.Helpers;
 using Abril_Backend.Shared.Services.Notificaciones.Dtos;
@@ -26,6 +27,7 @@ public class AtsService : IAtsService
     private readonly INotificacionesService _notificacionesService;
     private readonly IResidenteProyectoResolver _residentes;
     private readonly IUserFeatureService _userFeatureService;
+    private readonly IInduccionVigenciaService _induccionVigencia;
     private readonly string[] _logoPaths;
 
     public AtsService(
@@ -36,8 +38,10 @@ public class AtsService : IAtsService
         INotificacionesService notificacionesService,
         IResidenteProyectoResolver residentes,
         IUserFeatureService userFeatureService,
+        IInduccionVigenciaService induccionVigencia,
         IWebHostEnvironment env)
     {
+        _induccionVigencia = induccionVigencia;
         _repository = repository;
         _fileStorageService = fileStorageService;
         _containerResolver = containerResolver;
@@ -83,6 +87,8 @@ public class AtsService : IAtsService
     public async Task Editar(int id, int workerId, AtsGuardarRequestDto dto)
     {
         await ExigirAutorizacionPermiso(workerId);
+        // Inducción vigente (solo si el proyecto tiene el bloqueo encendido; apagado por defecto).
+        await _induccionVigencia.ExigirParaAts(workerId, dto.ProyectoId);
         Validar(dto);
         await _repository.Editar(id, workerId, dto);
     }
@@ -670,6 +676,7 @@ public class AtsService : IAtsService
     public async Task<AtsGrupoCrearResponseDto> CrearGrupo(int workerId, AtsGuardarRequestDto dto, bool esAdmin = false)
     {
         await ExigirAutorizacionPermiso(workerId);
+        await _induccionVigencia.ExigirParaAts(workerId, dto.ProyectoId);
 
         // Corrección con revisión: el grupo anterior queda "Reemplazado" y esta es la Rev. N+1 (se vuelve a firmar todo).
         SsAtsGrupo? anterior = null;
@@ -1261,6 +1268,7 @@ public class AtsService : IAtsService
             throw new AbrilException("Este trabajador no está habilitado para firmar en este proyecto.", 403);
 
         await ExigirAutorizacionPermiso(body.WorkerId);
+        await _induccionVigencia.ExigirParaAts(body.WorkerId, grupo.ProyectoId);
         await ObtenerFirmaDigitalObligatoria(body.WorkerId); // antes de crear el borrador, para no dejarlo huérfano
 
         // Una sola adhesión por trabajador: si ya firmó, no se crea otro ATS (el flujo público lo manda a los PETAR).
