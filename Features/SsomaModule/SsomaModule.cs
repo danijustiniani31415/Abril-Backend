@@ -282,6 +282,13 @@ namespace Abril_Backend.Features.Ssoma
             services.AddHostedService<Abril_Backend.Features.SsomaModule.InduccionFeature.Infrastructure.InduccionAlertaService>();
             services.AddHostedService<Abril_Backend.Features.SsomaModule.InduccionFeature.Infrastructure.InduccionPostCierreService>();
 
+            // Check list digital de inspección pre-uso de equipos (arnés SSO-FO-049, minicargador SSO-FO-056…):
+            // QR por proyecto/equipo, llenado sin login (DNI + selfie + firma), cadena de firmas y bloqueo de equipos.
+            services.AddScoped<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Interfaces.IInspeccionEquipoRepository,
+                Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Repositories.InspeccionEquipoRepository>();
+            services.AddScoped<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Application.Interfaces.IInspeccionEquipoService,
+                Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Application.Services.InspeccionEquipoService>();
+
             // PETAR — Permiso Escrito de Trabajo de Alto Riesgo, enlazado al ATS que lo origina.
             services.AddScoped<IPetarRepository, PetarRepository>();
             services.AddScoped<IPetarService, PetarService>();

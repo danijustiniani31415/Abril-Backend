@@ -217,6 +217,22 @@ namespace Abril_Backend.Features.SsomaModule.PetarFeature.Presentation
             catch (Exception ex) { _logger.LogError(ex, "Error en PetarController.GetEstadosPorAtsGrupo"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
         }
 
+        /// <summary>PETAR de varias cuadrillas en UNA llamada (ids separados por coma) — el listado de ATS evita una petición por cuadrilla.</summary>
+        [HttpGet("grupo/por-ats-grupos")]
+        public async Task<IActionResult> GetEstadosPorAtsGrupos([FromQuery] string ids)
+        {
+            try
+            {
+                var lista = (ids ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(x => int.TryParse(x, out var n) ? n : 0).Where(n => n > 0).ToList();
+                var userId = CurrentUserId();
+                var workerId = await _service.ResolverWorkerId(userId);
+                return Ok(await _service.GetEstadosPorAtsGrupos(lista, userId, workerId, EsAdmin()));
+            }
+            catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
+            catch (Exception ex) { _logger.LogError(ex, "Error en PetarController.GetEstadosPorAtsGrupos"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
+        }
+
         [HttpGet("grupo/{id:int}/estado")]
         public async Task<IActionResult> GetEstadoGrupo(int id)
         {

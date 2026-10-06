@@ -30,6 +30,8 @@ public interface IPetarService
     Task<PetarGrupoCrearResponseDto> CrearGrupo(int workerId, PetarGrupoCrearRequestDto dto);
     Task<List<PetarGrupoResumenPublicoDto>> GetGruposPublicoPorAtsToken(Guid atsToken);
     Task<List<PetarGrupoEstadoDto>> GetEstadosPorAtsGrupo(int atsGrupoId, int callerUserId, int workerId, bool esAdmin);
+    /// <summary>Lo mismo para varios ATS grupales a la vez (el listado de ATS lo pide una sola vez por página).</summary>
+    Task<Dictionary<int, List<PetarGrupoEstadoDto>>> GetEstadosPorAtsGrupos(IReadOnlyCollection<int> atsGrupoIds, int callerUserId, int workerId, bool esAdmin);
     Task<PetarGrupoEstadoDto> GetEstadoGrupo(int id, int callerUserId, int workerId, bool esAdmin);
     Task CerrarGrupo(int id, int workerId, bool esAdmin);
     Task FirmarCapatazGrupo(int id, int callerUserId, bool esAdmin, PetarFirmarVistoRequestDto body);

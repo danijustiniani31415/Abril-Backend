@@ -298,19 +298,19 @@ public class AtsService : IAtsService
     /// <summary>Mismo alcance que Listar: un trabajador normal solo ve los grupos de SU proyecto actual.</summary>
     public async Task<AtsGrupoListResponseDto> ListarGrupos(AtsFiltroDto filtro, int workerId, bool esAdmin)
     {
-        if (!esAdmin)
+        if (!esAdmin || (filtro.ProyectoActual && !filtro.ProyectoId.HasValue))
         {
             var (_, proyectoActualId) = await _repository.GetPuestoYProyectoActual(workerId);
             filtro.ProyectoId = proyectoActualId;
         }
         var res = await _repository.ListarGrupos(filtro);
 
-        // Permisos de firma por cuadrilla (mismo criterio que GetEstadoGrupo) — se resuelven una vez por proyecto.
-        var rolesPorProyecto = new Dictionary<int, (bool EsResidente, bool EsProduccion, bool EsSsoma)>();
+        // Permisos de firma por cuadrilla (mismo criterio que GetEstadoGrupo) — se resuelven una vez por proyecto, y los
+        // datos de la PERSONA (correo, prevencionista, ficha) una sola vez, no una por proyecto: cada consulta paga un viaje a la BD.
+        var rolesPorProyecto = await RolesEnProyectos(res.Data.Select(g => g.ProyectoId).Distinct().ToList(), workerId);
         foreach (var g in res.Data)
         {
-            if (!rolesPorProyecto.TryGetValue(g.ProyectoId, out var roles))
-                rolesPorProyecto[g.ProyectoId] = roles = await RolesEnProyecto(g.ProyectoId, workerId);
+            var roles = rolesPorProyecto[g.ProyectoId];
             var abierto = g.Estado is not ("Anulado" or "Reemplazado");
             // La validación solo corre con la cuadrilla CERRADA (cierre manual del autor/Capataz/Residente/Producción/SSOMA).
             var validable = g.Estado == "Cerrado";
@@ -1078,6 +1078,35 @@ public class AtsService : IAtsService
                 items: [new NuevaNotificacionDto { Titulo = titulo, Subtitulo = "ATS", Descripcion = descripcion, Referencia = referencia }]);
         }
         catch { /* best-effort */ }
+    }
+
+    /// <summary>Roles de la persona en VARIOS proyectos a la vez: lo propio de la persona se consulta una vez y lo de cada
+    /// proyecto en paralelo (cada consulta usa su propio DbContext). Misma regla que <see cref="RolesEnProyecto"/>.</summary>
+    private async Task<Dictionary<int, (bool EsResidente, bool EsProduccion, bool EsSsoma)>> RolesEnProyectos(IReadOnlyCollection<int> proyectoIds, int workerId)
+    {
+        if (proyectoIds.Count == 0) return [];
+        var emailT = _repository.GetEmailCorporativoWorker(workerId);
+        var prevencionistaT = _repository.EsPrevencionistaAbril(workerId);
+        var personIdT = _repository.GetPersonIdDeWorker(workerId);
+        await Task.WhenAll(emailT, prevencionistaT, personIdT);
+
+        var tareas = proyectoIds.ToDictionary(id => id, async id =>
+        {
+            var responsablesT = _repository.GetResponsables(id);
+            var residenteT = _residentes.ResidenteDelProyectoAsync(id);
+            var produccionT = _repository.EsProduccionDeProyecto(workerId, id);
+            await Task.WhenAll(responsablesT, residenteT, produccionT);
+
+            var residente = residenteT.Result;
+            var esResidente = residente != null
+                && (residente.WorkerId == workerId || (residente.PersonId != null && residente.PersonId == personIdT.Result));
+            var esProduccion = !esResidente && produccionT.Result;
+            var esSsoma = (emailT.Result != null && responsablesT.Result.SsomaEmails.Contains(emailT.Result, StringComparer.OrdinalIgnoreCase))
+                          || prevencionistaT.Result;
+            return (esResidente, esProduccion, esSsoma);
+        });
+        await Task.WhenAll(tareas.Values);
+        return tareas.ToDictionary(k => k.Key, k => k.Value.Result);
     }
 
     private async Task<(bool EsResidente, bool EsProduccion, bool EsSsoma)> RolesEnProyecto(int proyectoId, int workerId)

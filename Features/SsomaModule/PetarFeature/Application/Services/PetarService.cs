@@ -656,11 +656,72 @@ public class PetarService : IPetarService
     /// puede firmar sigue viviendo en FirmarVistoGrupoComun, no acá.</summary>
     public async Task<List<PetarGrupoEstadoDto>> GetEstadosPorAtsGrupo(int atsGrupoId, int callerUserId, int workerId, bool esAdmin)
     {
+        var obrasT = _residentes.ProyectosDelResidenteAsync(callerUserId);
+        var emailT = _atsRepository.GetEmailCorporativoWorker(workerId);
+        await Task.WhenAll(obrasT, emailT);
+        return await EstadosDeAtsGrupo(atsGrupoId, workerId, esAdmin, obrasT.Result.ToHashSet(), emailT.Result);
+    }
+
+    public async Task<Dictionary<int, List<PetarGrupoEstadoDto>>> GetEstadosPorAtsGrupos(IReadOnlyCollection<int> atsGrupoIds, int callerUserId, int workerId, bool esAdmin)
+    {
+        var ids = atsGrupoIds.Distinct().Take(60).ToList();
+        if (ids.Count == 0) return [];
+
+        // Lo de quien llama (obras donde es Residente, correo) se consulta UNA vez para todas las cuadrillas de la página.
+        var obrasT = _residentes.ProyectosDelResidenteAsync(callerUserId);
+        var emailT = _atsRepository.GetEmailCorporativoWorker(workerId);
+        await Task.WhenAll(obrasT, emailT);
+        var obras = obrasT.Result.ToHashSet();
+
+        // Cada cuadrilla usa sus propios DbContext: se resuelven en paralelo, con tope para no saturar el pool de conexiones.
+        using var compuerta = new SemaphoreSlim(6);
+        var tareas = ids.ToDictionary(id => id, async id =>
+        {
+            await compuerta.WaitAsync();
+            try { return await EstadosDeAtsGrupo(id, workerId, esAdmin, obras, emailT.Result); }
+            finally { compuerta.Release(); }
+        });
+        await Task.WhenAll(tareas.Values);
+        return tareas.ToDictionary(k => k.Key, k => k.Value.Result);
+    }
+
+    /// <summary>PETAR de UN ATS grupal con los permisos de quien llama. Todo lo que es igual para todos los PETAR de la cuadrilla
+    /// (estado del ATS grupal, responsables, roles en el proyecto) se consulta una vez, no una por PETAR. Mismas reglas que
+    /// <see cref="MarcarPermisosGrupo"/>.</summary>
+    private async Task<List<PetarGrupoEstadoDto>> EstadosDeAtsGrupo(int atsGrupoId, int workerId, bool esAdmin, HashSet<int> obrasDondeEsResidente, string? email)
+    {
         var lista = await _repository.GetEstadosPorAtsGrupo(atsGrupoId);
-        // Las obras donde quien llama es el Residente, una sola vez para toda la lista.
-        var obrasDondeEsResidente = (await _residentes.ProyectosDelResidenteAsync(callerUserId)).ToHashSet();
-        foreach (var dto in lista)
-            await MarcarPermisosGrupo(dto, workerId, esAdmin, obrasDondeEsResidente.Contains(dto.ProyectoId));
+        if (lista.Count == 0) return lista;
+
+        var estadoAts = await _atsRepository.GetEstadoGrupo(atsGrupoId);
+        foreach (var d in lista) d.RequiereCapataz = estadoAts?.RequiereCapataz ?? false;
+        if (estadoAts?.Estado != "Cerrado") return lista;
+
+        var activos = lista.Where(d => d.Estado == "Activo").ToList();
+        if (activos.Count == 0) return lista;
+
+        var atsCompleto = estadoAts.AutorizaFirmados >= estadoAts.EjecutantesFirmados && (!estadoAts.RequiereCapataz || estadoAts.CapatazVigente);
+
+        var proyectos = activos.Select(d => d.ProyectoId).Distinct().ToList();
+        var permisos = proyectos.ToDictionary(id => id, async id =>
+        {
+            if (esAdmin) return (EsResidente: true, EsSsoma: true, EsCapataz: true);
+            var responsablesT = _atsRepository.GetResponsables(id);
+            var produccionT = obrasDondeEsResidente.Contains(id) ? Task.FromResult(true) : _atsRepository.EsProduccionDeProyecto(workerId, id);
+            var capatazT = _atsRepository.EsCapatazDeProyecto(workerId, id);
+            await Task.WhenAll(responsablesT, produccionT, capatazT);
+            var esSsoma = email != null && responsablesT.Result.SsomaEmails.Contains(email, StringComparer.OrdinalIgnoreCase);
+            return (EsResidente: produccionT.Result, EsSsoma: esSsoma, EsCapataz: capatazT.Result);
+        });
+        await Task.WhenAll(permisos.Values);
+
+        foreach (var dto in activos)
+        {
+            var p = permisos[dto.ProyectoId].Result;
+            dto.PuedeFirmarCapataz = p.EsCapataz && dto.RequiereCapataz && !dto.CapatazFirmado && dto.TotalAdhesiones > 0;
+            dto.PuedeFirmarSupervisor = p.EsResidente && !dto.SupervisorFirmado && (!dto.RequiereCapataz || dto.CapatazFirmado);
+            dto.PuedeFirmarSsoma = p.EsSsoma && dto.SupervisorFirmado && !dto.SsomaFirmado && atsCompleto;
+        }
         return lista;
     }
 

@@ -398,6 +398,9 @@ public class AtsFiltroDto
     public DateOnly? FechaHasta { get; set; }
     public string? Estado { get; set; }
     public int Page { get; set; } = 1;
+    /// <summary>Primera carga del listado: el servidor usa el proyecto actual de quien consulta (así el front no espera a conocerlo
+    /// para pedir el listado y ambas llamadas salen en paralelo). Se ignora si ya viene ProyectoId.</summary>
+    public bool ProyectoActual { get; set; }
 }
 
 

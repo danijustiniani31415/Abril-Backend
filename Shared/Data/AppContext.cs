@@ -276,6 +276,18 @@ namespace Abril_Backend.Infrastructure.Data
         public DbSet<Abril_Backend.Features.SsomaModule.AtsFeature.Infrastructure.Models.SsAtsProyectoQr> SsAtsProyectoQr => Set<Abril_Backend.Features.SsomaModule.AtsFeature.Infrastructure.Models.SsAtsProyectoQr>();
         public DbSet<Abril_Backend.Features.SsomaModule.AtsFeature.Infrastructure.Models.SsAtsConsentimiento> SsAtsConsentimiento => Set<Abril_Backend.Features.SsomaModule.AtsFeature.Infrastructure.Models.SsAtsConsentimiento>();
 
+        // Check list digital de inspección pre-uso de equipos (InspeccionEquipoFeature)
+        public DbSet<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspEquipoTipo> SsInspEquipoTipo => Set<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspEquipoTipo>();
+        public DbSet<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspEquipoTipoVariante> SsInspEquipoTipoVariante => Set<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspEquipoTipoVariante>();
+        public DbSet<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspPlantillaItem> SsInspPlantillaItem => Set<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspPlantillaItem>();
+        public DbSet<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspItemMarcador> SsInspItemMarcador => Set<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspItemMarcador>();
+        public DbSet<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspEquipo> SsInspEquipo => Set<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspEquipo>();
+        public DbSet<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspInspeccion> SsInspInspeccion => Set<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspInspeccion>();
+        public DbSet<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspInspeccionVariante> SsInspInspeccionVariante => Set<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspInspeccionVariante>();
+        public DbSet<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspRespuesta> SsInspRespuesta => Set<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspRespuesta>();
+        public DbSet<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspEquipoEvento> SsInspEquipoEvento => Set<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspEquipoEvento>();
+        public DbSet<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspAuditLog> SsInspAuditLog => Set<Abril_Backend.Features.SsomaModule.InspeccionEquipoFeature.Infrastructure.Models.SsInspAuditLog>();
+
         // PETAR — Permiso Escrito de Trabajo de Alto Riesgo (PetarFeature)
         public DbSet<Abril_Backend.Features.SsomaModule.PetarFeature.Infrastructure.Models.SsPetarTipo> SsPetarTipo => Set<Abril_Backend.Features.SsomaModule.PetarFeature.Infrastructure.Models.SsPetarTipo>();
         public DbSet<Abril_Backend.Features.SsomaModule.PetarFeature.Infrastructure.Models.SsPetarItem> SsPetarItem => Set<Abril_Backend.Features.SsomaModule.PetarFeature.Infrastructure.Models.SsPetarItem>();
