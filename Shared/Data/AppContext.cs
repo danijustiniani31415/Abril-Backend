@@ -660,6 +660,7 @@ namespace Abril_Backend.Infrastructure.Data
         public DbSet<Abril_Backend.Features.SsomaModule.ActivosRotativosFeature.Infrastructure.Models.SsActivoRotativoMovimiento> SsActivoRotativoMovimiento => Set<Abril_Backend.Features.SsomaModule.ActivosRotativosFeature.Infrastructure.Models.SsActivoRotativoMovimiento>();
 
         // EPP — Catálogo Autorizado (SSOMA + Logística)
+        public DbSet<Abril_Backend.Features.SsomaModule.SenaleticaFeature.Infrastructure.Models.SsSenal> SsSenal => Set<Abril_Backend.Features.SsomaModule.SenaleticaFeature.Infrastructure.Models.SsSenal>();
         public DbSet<Abril_Backend.Features.SsomaModule.EppFeature.Infrastructure.Models.SsEppCategoria> SsEppCategoria => Set<Abril_Backend.Features.SsomaModule.EppFeature.Infrastructure.Models.SsEppCategoria>();
         public DbSet<Abril_Backend.Features.SsomaModule.EppFeature.Infrastructure.Models.SsEppFamilia> SsEppFamilia => Set<Abril_Backend.Features.SsomaModule.EppFeature.Infrastructure.Models.SsEppFamilia>();
         public DbSet<Abril_Backend.Features.SsomaModule.EppFeature.Infrastructure.Models.SsEppItem> SsEppItem => Set<Abril_Backend.Features.SsomaModule.EppFeature.Infrastructure.Models.SsEppItem>();

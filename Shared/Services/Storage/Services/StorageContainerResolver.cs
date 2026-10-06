@@ -161,6 +161,16 @@ namespace Abril_Backend.Infrastructure.Services
             };
         }
 
+        public string GetSenaleticaImagenesContainerName()
+        {
+            return _options.StorageProvider.ToLower() switch
+            {
+                "azure" => _options.AzureStorage.SenaleticaImagenesContainer,
+                "local" => _options.LocalStorage.SenaleticaImagenesContainer,
+                _ => throw new InvalidOperationException("Proveedor de storage no válido")
+            };
+        }
+
         public string GetEppFichasTecnicasContainerName()
         {
             return _options.StorageProvider.ToLower() switch

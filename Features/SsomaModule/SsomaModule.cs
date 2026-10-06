@@ -367,6 +367,12 @@ namespace Abril_Backend.Features.Ssoma
             services.AddScoped<ICumplimientoRepository, CumplimientoRepository>();
             services.AddScoped<ICumplimientoService, CumplimientoService>();
 
+            // Señalética de seguridad (NTP 399.010-1) — catálogo editable, solo SSOMA
+            services.AddScoped<Abril_Backend.Features.SsomaModule.SenaleticaFeature.Infrastructure.Interfaces.ISenaleticaRepository,
+                Abril_Backend.Features.SsomaModule.SenaleticaFeature.Infrastructure.Repositories.SenaleticaRepository>();
+            services.AddScoped<Abril_Backend.Features.SsomaModule.SenaleticaFeature.Application.Interfaces.ISenaleticaService,
+                Abril_Backend.Features.SsomaModule.SenaleticaFeature.Application.Services.SenaleticaService>();
+
             // EPP — Catálogo Autorizado (SSOMA + Logística)
             services.AddScoped<IEppRepository, EppRepository>();
             services.AddScoped<IEppService, EppService>();

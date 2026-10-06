@@ -26,6 +26,7 @@ namespace Abril_Backend.Infrastructure.Services
         public string TareosContainer { get; set; } = "tareos";
         public string EppImagenesContainer { get; set; } = "epp-imagenes";
         public string EppFichasTecnicasContainer { get; set; } = "epp-fichas-tecnicas";
+        public string SenaleticaImagenesContainer { get; set; } = "senaletica-imagenes";
         public string ResiduosContainer { get; set; } = "residuos";
         public string CursoImagenesContainer { get; set; } = "curso-imagenes";
         public string AtsContainer { get; set; } = "ats";
@@ -49,6 +50,7 @@ namespace Abril_Backend.Infrastructure.Services
         public string TareosContainer { get; set; } = "tareos";
         public string EppImagenesContainer { get; set; } = "epp-imagenes";
         public string EppFichasTecnicasContainer { get; set; } = "epp-fichas-tecnicas";
+        public string SenaleticaImagenesContainer { get; set; } = "senaletica-imagenes";
         public string ResiduosContainer { get; set; } = "residuos";
         public string CursoImagenesContainer { get; set; } = "curso-imagenes";
         public string AtsContainer { get; set; } = "ats";
