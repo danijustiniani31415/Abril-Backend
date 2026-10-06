@@ -92,6 +92,8 @@ public class FlashReportListItemDto
     public string TipoCodigo { get; set; } = string.Empty;
     public string AreaOrigen { get; set; } = "Produccion";
     public string? TrabajadorNombre { get; set; }
+    public string? EtapaProyectoNombre { get; set; }
+    public string? PartidaNombre { get; set; }
     public string Estado { get; set; } = string.Empty;
     public int? AccidenteTrabajoId { get; set; }
     public bool Enviado { get; set; }

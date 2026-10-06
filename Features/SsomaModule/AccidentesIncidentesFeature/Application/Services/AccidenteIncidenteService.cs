@@ -32,9 +32,10 @@ public class AccidenteIncidenteService : IAccidenteIncidenteService
     public Task<FlashReportInicializarDto> GetInicializarAsync() => _repo.GetInicializarAsync();
 
     public async Task<object> GetListAsync(int? proyectoId, int? tipoId, string? estado,
-        DateTime? fechaDesde, DateTime? fechaHasta, bool? soloEnviados, string? areaOrigen, int page, int pageSize)
+        DateTime? fechaDesde, DateTime? fechaHasta, bool? soloEnviados, string? areaOrigen,
+        int? etapaProyectoId, int? partidaId, int page, int pageSize)
     {
-        var (items, total) = await _repo.GetListAsync(proyectoId, tipoId, estado, fechaDesde, fechaHasta, soloEnviados, areaOrigen, page, pageSize);
+        var (items, total) = await _repo.GetListAsync(proyectoId, tipoId, estado, fechaDesde, fechaHasta, soloEnviados, areaOrigen, etapaProyectoId, partidaId, page, pageSize);
         return new { items, total, page, pageSize, totalPages = (int)Math.Ceiling((double)total / pageSize) };
     }
 

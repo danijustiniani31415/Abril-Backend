@@ -89,7 +89,8 @@ public class AccidenteIncidenteRepository : IAccidenteIncidenteRepository
     public async Task<(List<FlashReportListItemDto> Items, int Total)> GetListAsync(
         int? proyectoId, int? tipoId, string? estado,
         DateTime? fechaDesde, DateTime? fechaHasta,
-        bool? soloEnviados, string? areaOrigen, int page, int pageSize)
+        bool? soloEnviados, string? areaOrigen,
+        int? etapaProyectoId, int? partidaId, int page, int pageSize)
     {
         var where = new List<string>();
         var p = new DynamicParameters();
@@ -103,6 +104,8 @@ public class AccidenteIncidenteRepository : IAccidenteIncidenteRepository
         if (fechaHasta.HasValue)  { where.Add("a.fecha <= @fh"); p.Add("fh", fechaHasta.Value.Date); }
         if (soloEnviados == true) { where.Add("a.enviado = true"); }
         if (!string.IsNullOrEmpty(areaOrigen)) { where.Add("a.area_origen = @area"); p.Add("area", areaOrigen); }
+        if (etapaProyectoId.HasValue) { where.Add("a.etapa_proyecto_id = @etapaId"); p.Add("etapaId", etapaProyectoId); }
+        if (partidaId.HasValue)       { where.Add("a.partida_id = @partidaId"); p.Add("partidaId", partidaId); }
 
         var whereClause = where.Count > 0 ? "WHERE " + string.Join(" AND ", where) : "";
 
@@ -114,6 +117,8 @@ public class AccidenteIncidenteRepository : IAccidenteIncidenteRepository
                     SELECT t.trabajador_nombre FROM ssoma_accidente_trabajador t
                     WHERE t.accidente_incidente_id = a.id ORDER BY t.id LIMIT 1
                 )) AS trabajador_nombre,
+                ep.nombre AS etapa_proyecto_nombre,
+                pa.partida_description AS partida_nombre,
                 a.estado, a.enviado, a.fecha_envio,
                 a.consecuencia_real_personal, a.consecuencia_potencial_personal, a.descripcion,
                 at_vinc.id AS accidente_trabajo_id,
@@ -128,6 +133,8 @@ public class AccidenteIncidenteRepository : IAccidenteIncidenteRepository
             FROM ss_accidente_incidente a
             JOIN project p ON p.project_id = a.proyecto_id
             JOIN ssoma_flash_tipo t ON t.id = a.tipo_id
+            LEFT JOIN ssoma_flash_etapa_proyecto ep ON ep.id = a.etapa_proyecto_id
+            LEFT JOIN partida pa ON pa.partida_id = a.partida_id
             LEFT JOIN ss_accidente_trabajo at_vinc ON at_vinc.flash_report_id = a.id
             {whereClause}
             ORDER BY a.fecha DESC, a.id DESC

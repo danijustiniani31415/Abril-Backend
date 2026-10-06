@@ -6,7 +6,8 @@ public interface IAccidenteIncidenteService
 {
     Task<FlashReportInicializarDto> GetInicializarAsync();
     Task<object> GetListAsync(int? proyectoId, int? tipoId, string? estado,
-        DateTime? fechaDesde, DateTime? fechaHasta, bool? soloEnviados, string? areaOrigen, int page, int pageSize);
+        DateTime? fechaDesde, DateTime? fechaHasta, bool? soloEnviados, string? areaOrigen,
+        int? etapaProyectoId, int? partidaId, int page, int pageSize);
     Task<FlashReportDetalleDto> GetDetalleAsync(int id);
     Task<int> CrearAsync(CrearFlashReportRequest request, int? usuarioId);
     Task ActualizarAsync(int id, ActualizarFlashReportRequest request);

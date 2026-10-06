@@ -48,10 +48,12 @@ public class AccidenteIncidenteController : ControllerBase
         [FromQuery] DateTime? fechaHasta,
         [FromQuery] bool? soloEnviados,
         [FromQuery] string? areaOrigen,
+        [FromQuery] int? etapaProyectoId,
+        [FromQuery] int? partidaId,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20)
     {
-        try { return Ok(await _service.GetListAsync(proyectoId, tipoId, estado, fechaDesde, fechaHasta, soloEnviados, areaOrigen, page, pageSize)); }
+        try { return Ok(await _service.GetListAsync(proyectoId, tipoId, estado, fechaDesde, fechaHasta, soloEnviados, areaOrigen, etapaProyectoId, partidaId, page, pageSize)); }
         catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
         catch (Exception ex) { _logger.LogError(ex, "Error lista flash reports"); return StatusCode(500, new { message = "Error del servidor." }); }
     }
