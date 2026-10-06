@@ -12,7 +12,6 @@ public interface IAtsService
     Task<int> Crear(int workerId, AtsGuardarRequestDto dto);
     Task Editar(int id, int workerId, AtsGuardarRequestDto dto);
     Task<AtsResponseDto> GetPorId(int id, int callerUserId, int workerId, bool esAdmin);
-    Task<AtsListResponseDto> Listar(AtsFiltroDto filtro, int callerUserId, int workerId, bool esAdmin);
     Task<int> FirmarVistoGrupo(int grupoId, string rol, int callerUserId, bool esAdmin);
     Task<byte[]> GenerarPdfGrupo(int grupoId, int workerId, bool esAdmin);
     Task ReabrirGrupo(int grupoId, int workerId, bool esAdmin);
@@ -33,9 +32,6 @@ public interface IAtsService
     Task<AtsListaInitDto> GetListaInit(int workerId);
 
     Task Firmar(int id, int workerId, AtsFirmarRequestDto body, string? ipOrigen, string? userAgent);
-    Task FirmarCapataz(int id, int callerUserId, bool esAdmin, AtsFirmarVistoRequestDto body);
-    Task FirmarAutorizacion(int id, int callerUserId, bool esAdmin, AtsFirmarVistoRequestDto body);
-    Task FirmarVistoSsoma(int id, int callerUserId, bool esAdmin, AtsFirmarVistoRequestDto body);
     Task<byte[]> GenerarPdf(int id);
     Task<AtsVerificacionPublicaDto> VerificarPublico(int id, string? hash);
 
@@ -46,6 +42,10 @@ public interface IAtsService
     Task<List<AtsPlantillaPuestoDto>> GetPlantillaPuestoMapeo();
     Task SetPlantillaPuestos(int plantillaId, List<int> puestoIds);
     Task<int> CrearPlantilla(AtsPlantillaGuardarRequestDto dto);
+    Task<AtsEppDto> CrearEpp(AtsCatalogoItemCrearDto dto);
+    Task<AtsHerramientaDto> CrearHerramienta(AtsCatalogoItemCrearDto dto);
+    Task<AtsPeligroDto> CrearPeligro(AtsCatalogoItemCrearDto dto);
+    Task<AtsRiesgoDto> CrearRiesgo(int peligroId, AtsCatalogoItemCrearDto dto);
     Task EditarPlantilla(int id, AtsPlantillaGuardarRequestDto dto);
     Task DesactivarPlantilla(int id);
     Task<List<AtsPeligroDto>> GetPeligrosConRiesgos();

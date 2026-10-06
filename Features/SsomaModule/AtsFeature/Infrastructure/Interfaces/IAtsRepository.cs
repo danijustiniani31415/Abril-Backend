@@ -115,7 +115,6 @@ public interface IAtsRepository
 
     Task<bool> ExisteSelfieHash(string selfieHash);
 
-    Task<AtsListResponseDto> Listar(AtsFiltroDto filtro);
     Task<AtsGrupoListResponseDto> ListarGrupos(AtsFiltroDto filtro);
 
     /// <summary>true = obrero de obra (no Staff/Oficina Central, no Capataz/Maestro) por cada worker — una
@@ -124,6 +123,10 @@ public interface IAtsRepository
 
     // ── Administración de plantillas ────────────────────────────────────
     Task<int> CrearPlantilla(AtsPlantillaGuardarRequestDto dto);
+    Task<AtsEppDto> CrearEpp(AtsCatalogoItemCrearDto dto);
+    Task<AtsHerramientaDto> CrearHerramienta(AtsCatalogoItemCrearDto dto);
+    Task<AtsPeligroDto> CrearPeligro(AtsCatalogoItemCrearDto dto);
+    Task<AtsRiesgoDto> CrearRiesgo(int peligroId, AtsCatalogoItemCrearDto dto);
     Task EditarPlantilla(int id, AtsPlantillaGuardarRequestDto dto);
     Task DesactivarPlantilla(int id);
 
@@ -157,7 +160,6 @@ public interface IAtsRepository
     Task AgregarObservacion(SsAtsObservacion o);
     Task ResolverObservacion(int id, string respuesta, int workerId, string nombre);
     Task<int> ContarObservacionesAbiertas(int? atsId, int? grupoId);
-    Task<Dictionary<int, int>> ContarObservacionesAbiertasPorAts(IEnumerable<int> atsIds);
     Task ResolverObservacionesDeGrupo(int grupoId, string respuesta, int workerId, string nombre);
 
     Task AnularAts(int atsId, string motivo, int workerId);

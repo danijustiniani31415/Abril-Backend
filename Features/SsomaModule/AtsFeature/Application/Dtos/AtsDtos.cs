@@ -397,20 +397,9 @@ public class AtsFiltroDto
     public DateOnly? FechaDesde { get; set; }
     public DateOnly? FechaHasta { get; set; }
     public string? Estado { get; set; }
-    /// <summary>true = excluye los ATS que nacieron de una cuadrilla (AtsGrupoId != null): esos se ven
-    /// agrupados en la vista de ATS grupales, no repetidos uno por uno en el listado individual.</summary>
-    public bool SoloIndividuales { get; set; }
     public int Page { get; set; } = 1;
 }
 
-public class AtsListResponseDto
-{
-    public List<AtsResponseDto> Data { get; set; } = [];
-    public int Page { get; set; }
-    public int PageSize { get; set; }
-    public int TotalRecords { get; set; }
-    public int TotalPages { get; set; }
-}
 
 /// <summary>Lo mínimo que necesita el listado de ATS para poblar el filtro de proyecto — en vez de
 /// traer GetInit completo (catálogos de pasos/peligros/EPP/plantillas) solo para sacar proyectos.</summary>
@@ -788,4 +777,12 @@ public class AtsGrupoCrearPublicoRequestDto
     public int WorkerId { get; set; }
     public string DniConfirmacion { get; set; } = string.Empty;
     public AtsGuardarRequestDto Contenido { get; set; } = new();
+}
+
+/// <summary>Alta de un EPP o herramienta en el catálogo del ATS desde el detalle de plantilla.
+/// Categoria es opcional: EPP → "Específico" por defecto; herramienta → "Varios".</summary>
+public class AtsCatalogoItemCrearDto
+{
+    public string Nombre { get; set; } = string.Empty;
+    public string? Categoria { get; set; }
 }

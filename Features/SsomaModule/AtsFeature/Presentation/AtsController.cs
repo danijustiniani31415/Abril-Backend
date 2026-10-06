@@ -156,19 +156,6 @@ namespace Abril_Backend.Features.SsomaModule.AtsFeature.Presentation
             catch (Exception ex) { _logger.LogError(ex, "Error en AtsController.GetPorId"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
         }
 
-        [HttpGet]
-        public async Task<IActionResult> Listar([FromQuery] AtsFiltroDto filtro)
-        {
-            try
-            {
-                var userId = CurrentUserId();
-                var workerId = await _service.ResolverWorkerId(userId);
-                return Ok(await _service.Listar(filtro, userId, workerId, EsAdmin()));
-            }
-            catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
-            catch (Exception ex) { _logger.LogError(ex, "Error en AtsController.Listar"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
-        }
-
         [HttpPost("{id:int}/firmar")]
         public async Task<IActionResult> Firmar(int id, [FromBody] AtsFirmarRequestDto body)
         {
@@ -182,53 +169,6 @@ namespace Abril_Backend.Features.SsomaModule.AtsFeature.Presentation
             }
             catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
             catch (Exception ex) { _logger.LogError(ex, "Error en AtsController.Firmar"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
-        }
-
-        /// <summary>
-        /// Firma de "Capataz" (Capataz / Maestro de obra) — primer nivel de la cadena, solo
-        /// aplica cuando el ejecutante es obrero de obra. Adicional a la del ejecutante, que ya
-        /// debe estar firmada. Sin selfie ni geo: es una validación documental.
-        /// </summary>
-        [HttpPost("{id:int}/firmar-capataz")]
-        public async Task<IActionResult> FirmarCapataz(int id, [FromBody] AtsFirmarVistoRequestDto body)
-        {
-            try
-            {
-                await _service.FirmarCapataz(id, CurrentUserId(), EsAdmin(), body);
-                return Ok(new { message = "Firmado como Capataz." });
-            }
-            catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
-            catch (Exception ex) { _logger.LogError(ex, "Error en AtsController.FirmarCapataz"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
-        }
-
-        /// <summary>
-        /// Firma de "Autoriza" (Residente / Ing. de Producción) — adicional a la del ejecutante,
-        /// que ya debe estar firmada. Sin selfie ni geo: es una validación documental.
-        /// </summary>
-        [HttpPost("{id:int}/autorizar")]
-        public async Task<IActionResult> FirmarAutorizacion(int id, [FromBody] AtsFirmarVistoRequestDto body)
-        {
-            try
-            {
-                await _service.FirmarAutorizacion(id, CurrentUserId(), EsAdmin(), body);
-                return Ok(new { message = "Firmado como Autoriza." });
-            }
-            catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
-            catch (Exception ex) { _logger.LogError(ex, "Error en AtsController.FirmarAutorizacion"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
-        }
-
-        /// <summary>Visto Bueno de SSOMA (Prevencionista / Coordinador SSOMA) — verificación técnica
-        /// del análisis de riesgo, obligatoria y no removible (Art. 76 Reglamento Ley 29783).</summary>
-        [HttpPost("{id:int}/visto-bueno-ssoma")]
-        public async Task<IActionResult> FirmarVistoSsoma(int id, [FromBody] AtsFirmarVistoRequestDto body)
-        {
-            try
-            {
-                await _service.FirmarVistoSsoma(id, CurrentUserId(), EsAdmin(), body);
-                return Ok(new { message = "Visto bueno de SSOMA registrado." });
-            }
-            catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
-            catch (Exception ex) { _logger.LogError(ex, "Error en AtsController.FirmarVistoSsoma"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
         }
 
         /// <summary>
@@ -336,6 +276,38 @@ namespace Abril_Backend.Features.SsomaModule.AtsFeature.Presentation
             try { return Ok(await _service.GetPlantillas()); }
             catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
             catch (Exception ex) { _logger.LogError(ex, "Error en AtsController.GetPlantillas"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
+        }
+
+        [HttpPost("catalogo/peligros")]
+        public async Task<IActionResult> CrearPeligro([FromBody] AtsCatalogoItemCrearDto dto)
+        {
+            try { return Ok(await _service.CrearPeligro(dto)); }
+            catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
+            catch (Exception ex) { _logger.LogError(ex, "Error en AtsController.CrearPeligro"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
+        }
+
+        [HttpPost("catalogo/peligros/{peligroId:int}/riesgos")]
+        public async Task<IActionResult> CrearRiesgo(int peligroId, [FromBody] AtsCatalogoItemCrearDto dto)
+        {
+            try { return Ok(await _service.CrearRiesgo(peligroId, dto)); }
+            catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
+            catch (Exception ex) { _logger.LogError(ex, "Error en AtsController.CrearRiesgo"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
+        }
+
+        [HttpPost("catalogo/epps")]
+        public async Task<IActionResult> CrearEpp([FromBody] AtsCatalogoItemCrearDto dto)
+        {
+            try { return Ok(await _service.CrearEpp(dto)); }
+            catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
+            catch (Exception ex) { _logger.LogError(ex, "Error en AtsController.CrearEpp"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
+        }
+
+        [HttpPost("catalogo/herramientas")]
+        public async Task<IActionResult> CrearHerramienta([FromBody] AtsCatalogoItemCrearDto dto)
+        {
+            try { return Ok(await _service.CrearHerramienta(dto)); }
+            catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
+            catch (Exception ex) { _logger.LogError(ex, "Error en AtsController.CrearHerramienta"); return StatusCode(500, new { message = "Error del servidor. Por favor contactar al administrador del sistema." }); }
         }
 
         [HttpPost("plantillas")]

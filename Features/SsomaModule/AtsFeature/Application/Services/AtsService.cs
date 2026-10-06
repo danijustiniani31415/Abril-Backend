@@ -318,81 +318,6 @@ public class AtsService : IAtsService
     public async Task<AtsListaInitDto> GetListaInit(int workerId) =>
         await _repository.GetListaInit(workerId);
 
-    public async Task<AtsListResponseDto> Listar(AtsFiltroDto filtro, int callerUserId, int workerId, bool esAdmin)
-    {
-        if (!esAdmin)
-        {
-            var (_, proyectoActualId) = await _repository.GetPuestoYProyectoActual(workerId);
-            filtro.ProyectoId = proyectoActualId;
-        }
-
-        var res = await _repository.Listar(filtro);
-
-        // El "caller" (quien pide la lista) es el mismo en las 20 filas de la página — antes se
-        // repetían GetResponsables/EsProduccionDeProyecto/EsPrevencionista/GetEmailCorporativo
-        // por CADA fila (hasta 80 queries extra por página). Lo que depende solo del caller se
-        // calcula una vez; lo que depende del proyecto se cachea por proyecto, no por fila.
-        var callerEmail = await _repository.GetEmailCorporativoWorker(workerId);
-        var esPrevencionistaCaller = await _repository.EsPrevencionistaAbril(workerId);
-        var obrasDondeEsResidente = (await _residentes.ProyectosDelResidenteAsync(callerUserId)).ToHashSet();
-        var responsablesPorProyecto = new Dictionary<int, AtsResponsablesDto>();
-        var esProduccionPorProyecto = new Dictionary<int, bool>();
-        var esCapatazPorProyecto = new Dictionary<int, bool>();
-        // Una sola consulta para saber quién es obrero entre todos los ejecutantes de la página.
-        var esObreroPorWorkerId = await _repository.GetEsObreroDeObraBatch(res.Data.Select(a => a.WorkerId));
-
-        var permisosPorAtsId = new Dictionary<int, (bool, bool, bool)>();
-        foreach (var ats in res.Data)
-        {
-            if (!responsablesPorProyecto.TryGetValue(ats.ProyectoId, out var responsables))
-            {
-                responsables = await _repository.GetResponsables(ats.ProyectoId);
-                responsablesPorProyecto[ats.ProyectoId] = responsables;
-            }
-            if (!esProduccionPorProyecto.TryGetValue(ats.ProyectoId, out var esProduccion))
-            {
-                esProduccion = await _repository.EsProduccionDeProyecto(workerId, ats.ProyectoId);
-                esProduccionPorProyecto[ats.ProyectoId] = esProduccion;
-            }
-            if (!esCapatazPorProyecto.TryGetValue(ats.ProyectoId, out var esCapataz))
-            {
-                esCapataz = await _repository.EsCapatazDeProyecto(workerId, ats.ProyectoId);
-                esCapatazPorProyecto[ats.ProyectoId] = esCapataz;
-            }
-            if (!esObreroPorWorkerId.TryGetValue(ats.WorkerId, out var esObreroEjecutante))
-            {
-                esObreroEjecutante = await _repository.EsObreroDeObra(ats.WorkerId);
-                esObreroPorWorkerId[ats.WorkerId] = esObreroEjecutante;
-            }
-
-            var esResidente = obrasDondeEsResidente.Contains(ats.ProyectoId);
-            var (esCapatazEfectivo, esAutoriza, esSsoma) = CalcularPermisos(ats, workerId, esAdmin, responsables, callerEmail, esResidente, esProduccion, esPrevencionistaCaller, esCapataz, esObreroEjecutante);
-            ats.RequiereCapataz = esObreroEjecutante;
-            MarcarPermisos(ats, esCapatazEfectivo, esAutoriza, esSsoma);
-            permisosPorAtsId[ats.Id] = (esAutoriza, esSsoma, esCapatazEfectivo);
-        }
-
-        var obsPorAts = await _repository.ContarObservacionesAbiertasPorAts(res.Data.Select(a => a.Id));
-        foreach (var a in res.Data) a.ObservacionesAbiertas = obsPorAts.GetValueOrDefault(a.Id);
-
-        await _repository.CompletarInfoPetar(res.Data, permisosPorAtsId);
-        return res;
-    }
-
-    private static (bool EsCapataz, bool EsAutoriza, bool EsSsoma) CalcularPermisos(
-        AtsResponseDto ats, int workerId, bool esAdmin, AtsResponsablesDto responsables,
-        string? callerEmail, bool esResidente, bool esProduccion, bool esPrevencionistaCaller, bool esCapataz, bool esObreroEjecutante)
-    {
-        if (ats.WorkerId == workerId) return esAdmin ? (true, true, true) : (false, false, false);
-
-        var esProduccionEfectivo = !esResidente && esProduccion;
-        var esCoordSsoma = callerEmail != null && responsables.SsomaEmails.Contains(callerEmail, StringComparer.OrdinalIgnoreCase);
-        var esPrevencionista = !esCoordSsoma && esPrevencionistaCaller;
-        var esCapatazEfectivo = esObreroEjecutante && (esCapataz || esAdmin);
-
-        return (esCapatazEfectivo, esResidente || esProduccionEfectivo || esAdmin, esCoordSsoma || esPrevencionista || esAdmin);
-    }
-
     private static void MarcarPermisos(AtsResponseDto ats, bool esCapataz, bool esAutoriza, bool esSsoma)
     {
         ats.PuedeCapataz = esCapataz && ats.Estado == "Firmado" && ats.CapatazFirmaUrl == null;
@@ -490,15 +415,6 @@ public class AtsService : IAtsService
         }
         catch { /* best-effort */ }
     }
-
-    public async Task FirmarCapataz(int id, int callerUserId, bool esAdmin, AtsFirmarVistoRequestDto body)
-        => await FirmarVistoComun(id, callerUserId, esAdmin, body, "Capataz");
-
-    public async Task FirmarAutorizacion(int id, int callerUserId, bool esAdmin, AtsFirmarVistoRequestDto body)
-        => await FirmarVistoComun(id, callerUserId, esAdmin, body, "Autoriza");
-
-    public async Task FirmarVistoSsoma(int id, int callerUserId, bool esAdmin, AtsFirmarVistoRequestDto body)
-        => await FirmarVistoComun(id, callerUserId, esAdmin, body, "Ssoma");
 
     private async Task FirmarVistoComun(int id, int callerUserId, bool esAdmin, AtsFirmarVistoRequestDto body, string rol)
     {
@@ -639,6 +555,34 @@ public class AtsService : IAtsService
     public Task SetPasoPuestos(int pasoId, List<int> puestoIds) => _repository.SetPasoPuestos(pasoId, puestoIds);
     public Task<List<AtsPlantillaPuestoDto>> GetPlantillaPuestoMapeo() => _repository.GetPlantillaPuestoMapeo();
     public Task SetPlantillaPuestos(int plantillaId, List<int> puestoIds) => _repository.SetPlantillaPuestos(plantillaId, puestoIds);
+
+    public async Task<AtsEppDto> CrearEpp(AtsCatalogoItemCrearDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Nombre))
+            throw new AbrilException("El EPP necesita un nombre.", 400);
+        return await _repository.CrearEpp(dto);
+    }
+
+    public async Task<AtsPeligroDto> CrearPeligro(AtsCatalogoItemCrearDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Nombre))
+            throw new AbrilException("El peligro necesita un nombre.", 400);
+        return await _repository.CrearPeligro(dto);
+    }
+
+    public async Task<AtsRiesgoDto> CrearRiesgo(int peligroId, AtsCatalogoItemCrearDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Nombre))
+            throw new AbrilException("El riesgo necesita un nombre.", 400);
+        return await _repository.CrearRiesgo(peligroId, dto);
+    }
+
+    public async Task<AtsHerramientaDto> CrearHerramienta(AtsCatalogoItemCrearDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Nombre))
+            throw new AbrilException("La herramienta necesita un nombre.", 400);
+        return await _repository.CrearHerramienta(dto);
+    }
 
     public async Task<int> CrearPlantilla(AtsPlantillaGuardarRequestDto dto)
     {

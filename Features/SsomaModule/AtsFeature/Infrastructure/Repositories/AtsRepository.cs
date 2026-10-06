@@ -684,7 +684,7 @@ public class AtsRepository : IAtsRepository
 
         var atsIds = ats.Select(a => a.Id).ToList();
 
-        // dto.Riesgos viene vacío en el listado (ToDtoResumen, ver AtsRepository.Listar) — se
+        // dto.Riesgos viene vacío en el listado — se
         // consulta aparte, liviano (solo AtsId+RiesgoId), en vez de depender del include pesado.
         var atsIdsConRiesgoPetar = (await ctx.SsAtsRiesgoDetalle
             .Where(r => atsIds.Contains(r.AtsId) && riesgoIdsQueRequierenPetar.Contains(r.RiesgoId))
@@ -1315,45 +1315,6 @@ public class AtsRepository : IAtsRepository
         return await ctx.SsAts.AnyAsync(a => a.SelfieHash == selfieHash);
     }
 
-    /// <summary>Listado paginado — a propósito NO trae Pasos/Epps/Herramientas/RiesgosDetalle
-    /// (eran includes pesados repetidos en cada una de las 20 filas de la página, aun cuando la
-    /// fila no está expandida): eso se pide aparte por ATS individual (GetPorId) recién cuando el
-    /// usuario hace clic en "Ver detalle" o abre el modal de firma. Con cientos de ATS/día y ~100
-    /// usuarios en simultáneo, ese detalle de más era el grueso de la lentitud del listado.</summary>
-    public async Task<AtsListResponseDto> Listar(AtsFiltroDto filtro)
-    {
-        using var ctx = _factory.CreateDbContext();
-
-        var query = ctx.SsAts
-            .AsNoTracking()
-            .Include(a => a.Worker).ThenInclude(w => w!.Person)
-            .Include(a => a.Proyecto)
-            .Include(a => a.Puesto)
-            .AsQueryable();
-
-        if (filtro.ProyectoId.HasValue) query = query.Where(a => a.ProyectoId == filtro.ProyectoId);
-        if (filtro.WorkerId.HasValue) query = query.Where(a => a.WorkerId == filtro.WorkerId);
-        if (filtro.FechaDesde.HasValue) query = query.Where(a => a.Fecha >= filtro.FechaDesde);
-        if (filtro.FechaHasta.HasValue) query = query.Where(a => a.Fecha <= filtro.FechaHasta);
-        if (!string.IsNullOrWhiteSpace(filtro.Estado)) query = query.Where(a => a.Estado == filtro.Estado);
-        if (filtro.SoloIndividuales) query = query.Where(a => a.AtsGrupoId == null);
-
-        query = query.OrderByDescending(a => a.Fecha).ThenByDescending(a => a.Id);
-
-        var total = await query.CountAsync();
-        var page = Math.Max(1, filtro.Page);
-        var data = await query.Skip((page - 1) * PageSize).Take(PageSize).ToListAsync();
-
-        return new AtsListResponseDto
-        {
-            Data = data.Select(ToDtoResumen).ToList(),
-            Page = page,
-            PageSize = PageSize,
-            TotalRecords = total,
-            TotalPages = (int)Math.Ceiling(total / (double)PageSize),
-        };
-    }
-
     public async Task<AtsGrupoListResponseDto> ListarGrupos(AtsFiltroDto filtro)
     {
         using var ctx = _factory.CreateDbContext();
@@ -1468,55 +1429,61 @@ public class AtsRepository : IAtsRepository
         });
     }
 
-    /// <summary>Misma forma que ToDto pero sin Pasos/Epps/Herramientas/Riesgos (listas vacías) —
-    /// ver comentario en Listar. No requiere que esas colecciones de navegación vengan cargadas.</summary>
-    private static AtsResponseDto ToDtoResumen(SsAts ats) => new()
+    // ── Alta de EPP / herramientas al catálogo ───────────────────────────
+
+    public async Task<AtsEppDto> CrearEpp(AtsCatalogoItemCrearDto dto)
     {
-        Id = ats.Id,
-        Codigo = ats.Codigo,
-        AnuladoMotivo = ats.AnuladoMotivo,
-        WorkerId = ats.WorkerId,
-        WorkerNombre = ats.Worker?.Person?.FullName,
-        ProyectoId = ats.ProyectoId,
-        ProyectoNombre = ats.Proyecto?.ProjectDescription,
-        PuestoId = ats.PuestoId,
-        PuestoNombre = ats.Puesto?.Nombre,
-        PlantillaId = ats.PlantillaId,
-        PlantillaNombre = ats.Plantilla?.Nombre,
-        Actividad = ats.Actividad,
-        TorreNombre = ats.TorreNombre,
-        Pisos = ats.Pisos,
-        Lugar = ats.Lugar,
-        Fecha = ats.Fecha,
-        HoraServidorFirma = ats.HoraServidorFirma,
-        OrigenOffline = ats.OrigenOffline,
-        HoraDispositivo = ats.HoraDispositivo,
-        Lat = ats.Lat,
-        Lng = ats.Lng,
-        PrecisionMetros = ats.PrecisionMetros,
-        SelfieUrl = ats.SelfieUrl,
-        FirmaUrl = ats.FirmaUrl,
-        Estado = ats.Estado,
-        AtsAnteriorId = ats.AtsAnteriorId,
-        PdfHash = ats.PdfHash,
-        AtsGrupoId = ats.AtsGrupoId,
-        CapatazNombre = ats.CapatazNombre,
-        CapatazCargo = ats.CapatazCargo,
-        CapatazFirmaUrl = ats.CapatazFirmaUrl,
-        CapatazHoraServidor = ats.CapatazHoraServidor,
-        AutorizaNombre = ats.AutorizaNombre,
-        AutorizaCargo = ats.AutorizaCargo,
-        AutorizaFirmaUrl = ats.AutorizaFirmaUrl,
-        AutorizaHoraServidor = ats.AutorizaHoraServidor,
-        SsomaNombre = ats.SsomaNombre,
-        SsomaCargo = ats.SsomaCargo,
-        SsomaFirmaUrl = ats.SsomaFirmaUrl,
-        SsomaHoraServidor = ats.SsomaHoraServidor,
-        Pasos = [],
-        Epps = [],
-        Herramientas = [],
-        Riesgos = [],
-    };
+        using var ctx = _factory.CreateDbContext();
+        var nombre = dto.Nombre.Trim();
+        if (await ctx.SsAtsEpp.AnyAsync(e => e.Nombre.ToLower() == nombre.ToLower()))
+            throw new AbrilException($"Ya existe un EPP llamado \"{nombre}\".", 400);
+        var orden = (short)((await ctx.SsAtsEpp.MaxAsync(e => (short?)e.Orden) ?? 0) + 1);
+        var epp = new SsAtsEpp { Nombre = nombre, Categoria = string.IsNullOrWhiteSpace(dto.Categoria) ? "Específico" : dto.Categoria.Trim(), Orden = orden, Activo = true };
+        ctx.SsAtsEpp.Add(epp);
+        await ctx.SaveChangesAsync();
+        return new AtsEppDto { Id = epp.Id, Nombre = epp.Nombre, Categoria = epp.Categoria };
+    }
+
+    public async Task<AtsPeligroDto> CrearPeligro(AtsCatalogoItemCrearDto dto)
+    {
+        using var ctx = _factory.CreateDbContext();
+        var nombre = dto.Nombre.Trim();
+        if (await ctx.SsAtsPeligro.AnyAsync(p => p.Nombre.ToLower() == nombre.ToLower()))
+            throw new AbrilException($"Ya existe un peligro llamado \"{nombre}\".", 400);
+        var orden = (short)((await ctx.SsAtsPeligro.MaxAsync(p => (short?)p.Orden) ?? 0) + 1);
+        var peligro = new SsAtsPeligro { Nombre = nombre, Orden = orden, Activo = true };
+        ctx.SsAtsPeligro.Add(peligro);
+        await ctx.SaveChangesAsync();
+        return new AtsPeligroDto { Id = peligro.Id, Nombre = peligro.Nombre, Riesgos = [] };
+    }
+
+    public async Task<AtsRiesgoDto> CrearRiesgo(int peligroId, AtsCatalogoItemCrearDto dto)
+    {
+        using var ctx = _factory.CreateDbContext();
+        if (!await ctx.SsAtsPeligro.AnyAsync(p => p.Id == peligroId))
+            throw new AbrilException("El peligro no existe.", 404);
+        var nombre = dto.Nombre.Trim();
+        if (await ctx.SsAtsRiesgo.AnyAsync(r => r.PeligroId == peligroId && r.Nombre.ToLower() == nombre.ToLower()))
+            throw new AbrilException($"Ese peligro ya tiene un riesgo llamado \"{nombre}\".", 400);
+        var orden = (short)((await ctx.SsAtsRiesgo.Where(r => r.PeligroId == peligroId).MaxAsync(r => (short?)r.Orden) ?? 0) + 1);
+        var riesgo = new SsAtsRiesgo { PeligroId = peligroId, Nombre = nombre, Orden = orden, Activo = true };
+        ctx.SsAtsRiesgo.Add(riesgo);
+        await ctx.SaveChangesAsync();
+        return new AtsRiesgoDto { Id = riesgo.Id, Nombre = riesgo.Nombre, RequierePetar = false };
+    }
+
+    public async Task<AtsHerramientaDto> CrearHerramienta(AtsCatalogoItemCrearDto dto)
+    {
+        using var ctx = _factory.CreateDbContext();
+        var nombre = dto.Nombre.Trim();
+        if (await ctx.SsAtsHerramienta.AnyAsync(h => h.Nombre.ToLower() == nombre.ToLower()))
+            throw new AbrilException($"Ya existe una herramienta llamada \"{nombre}\".", 400);
+        var orden = (short)((await ctx.SsAtsHerramienta.MaxAsync(h => (short?)h.Orden) ?? 0) + 1);
+        var herr = new SsAtsHerramienta { Nombre = nombre, Categoria = string.IsNullOrWhiteSpace(dto.Categoria) ? "Varios" : dto.Categoria.Trim(), Orden = orden, Activo = true };
+        ctx.SsAtsHerramienta.Add(herr);
+        await ctx.SaveChangesAsync();
+        return new AtsHerramientaDto { Id = herr.Id, Nombre = herr.Nombre, Categoria = herr.Categoria };
+    }
 
     // ── Administración de plantillas ────────────────────────────────────
 
@@ -2004,17 +1971,6 @@ public class AtsRepository : IAtsRepository
         return await q.CountAsync();
     }
 
-    public async Task<Dictionary<int, int>> ContarObservacionesAbiertasPorAts(IEnumerable<int> atsIds)
-    {
-        var ids = atsIds.Distinct().ToList();
-        if (ids.Count == 0) return [];
-        using var ctx = _factory.CreateDbContext();
-        return await ctx.SsAtsObservacion.AsNoTracking()
-            .Where(o => o.Estado == "Abierta" && o.AtsId != null && ids.Contains(o.AtsId.Value))
-            .GroupBy(o => o.AtsId!.Value)
-            .Select(g => new { Id = g.Key, N = g.Count() })
-            .ToDictionaryAsync(x => x.Id, x => x.N);
-    }
 
     public async Task ResolverObservacionesDeGrupo(int grupoId, string respuesta, int workerId, string nombre)
     {
