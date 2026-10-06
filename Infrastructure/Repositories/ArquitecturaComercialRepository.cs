@@ -2216,9 +2216,76 @@ namespace Abril_Backend.Infrastructure.Repositories
                     };
                 }).ToList();
 
+            // Carga día a día (lun–vie) de la semana pasada y la actual. No hay snapshot diario,
+            // así que se reconstruye con las fechas: una partida cuenta un día D si ya había
+            // arrancado (inicio efectivo o programado ≤ D) y no estaba culminada antes de D
+            // (misma definición de "carga actual" que usa el dashboard en vivo).
+            var todasActividades = await ctx.AcActividad.Where(a => a.Activo).ToListAsync();
+            var todasProjectIds = todasActividades.Select(a => a.ProjectId).Distinct().ToList();
+            var responsableMap = (await ctx.Project
+                    .Where(p => todasProjectIds.Contains(p.ProjectId) && p.ResponsableArqComId != null)
+                    .ToListAsync())
+                .ToDictionary(p => p.ProjectId, p => p.ResponsableArqComId!.Value);
+            int? Responsable1(AcActividad a) => a.UserId ??
+                (responsableMap.TryGetValue(a.ProjectId, out var rid) ? rid : (int?)null);
+
+            var equipoIds = todasActividades
+                .SelectMany(a => new[] { Responsable1(a), a.UserId2 })
+                .Where(id => id.HasValue).Select(id => id!.Value)
+                .Distinct().ToList();
+
+            var diasNombre = new[] { "Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb" };
+            var cargaDiaria = new List<CargaDiariaDTO>();
+            for (int sem = 1; sem >= 0; sem--)
+            {
+                var lunes = semLunesActual.AddDays(-7 * sem);
+                for (int d = 0; d < 5; d++)
+                {
+                    var dia = lunes.AddDays(d);
+                    if (dia > today) break;
+
+                    (int h, int e, int c) CargaDe(int uid)
+                    {
+                        var pend = todasActividades.Where(a =>
+                            (Responsable1(a) == uid || a.UserId2 == uid)
+                            && (a.FinEfectivo == null || a.FinEfectivo.Value > dia)
+                            && !((a.InicioEfectivo ?? a.InicioProgramado) is DateOnly ini && ini > dia)).ToList();
+                        return (pend.Count(a => a.Tipo == "HITO"),
+                                pend.Count(a => a.Tipo == "ENTREGABLE"),
+                                pend.Count(a => a.Tipo == "CONSULTA"));
+                    }
+
+                    double Ponderar((int h, int e, int c) x) =>
+                        (double)(x.h * PesoHitoCarga + x.e * PesoEntregableCarga + x.c * PesoConsultaCarga);
+
+                    var mio = CargaDe(userId);
+                    var miPond = Ponderar(mio);
+                    var promEquipo = equipoIds.Count > 0 ? equipoIds.Average(id => Ponderar(CargaDe(id))) : 0.0;
+                    var tagDia = promEquipo <= 0 ? "NORMAL"
+                        : miPond > promEquipo * 1.3 ? "SOBRECARGADO"
+                        : miPond < promEquipo * 0.7 ? "DISPONIBLE"
+                        : "NORMAL";
+
+                    cargaDiaria.Add(new CargaDiariaDTO
+                    {
+                        Fecha          = dia.ToString("yyyy-MM-dd"),
+                        Dia            = diasNombre[(int)dia.DayOfWeek],
+                        EsSemanaActual = sem == 0,
+                        Hitos          = mio.h,
+                        Entregables    = mio.e,
+                        Consultas      = mio.c,
+                        Total          = mio.h + mio.e + mio.c,
+                        TotalPonderado = miPond,
+                        PromedioEquipo = Math.Round(promEquipo, 1),
+                        Tag            = tagDia,
+                    });
+                }
+            }
+
             return new SupervisorHistoricoDTO
             {
                 Nombre              = nombre,
+                CargaDiaria         = cargaDiaria,
                 TotalActividades    = total,
                 Culminadas          = culminadas,
                 EnProceso           = enProceso,

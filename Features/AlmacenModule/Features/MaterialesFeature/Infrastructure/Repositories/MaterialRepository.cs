@@ -231,29 +231,52 @@ public class MaterialRepository : IMaterialRepository
     {
         using var ctx = _factory.CreateDbContext();
 
-        var query = ctx.AlmacenMovimientos.Include(m => m.Material).Include(m => m.Proyecto).AsQueryable();
+        var query = ctx.AlmacenMovimientos.AsQueryable();
         if (proyectoId.HasValue) query = query.Where(m => m.ProyectoId == proyectoId.Value);
 
-        var movimientos = await query.ToListAsync();
+        // Todo se agrega en la base (igual que GetStock): antes se traían TODOS los movimientos
+        // con Include de material y proyecto a memoria, y con data real el dashboard no cargaba.
+        var agregados = await query
+            .GroupBy(m => m.MaterialId)
+            .Select(g => new
+            {
+                MaterialId = g.Key,
+                TotalIngresos = g.Where(m => TipoMovimientoAlmacen.SumanStock.Contains(m.Tipo)).Sum(m => m.Cantidad),
+                TotalSalidas = g.Where(m => m.Tipo == TipoMovimientoAlmacen.Salida).Sum(m => m.Cantidad)
+            })
+            .ToListAsync();
+
+        var nombresMaterial = await ctx.AlmacenMateriales
+            .ToDictionaryAsync(m => m.Id, m => m.Nombre);
 
         // 1) Flujo de materiales: ingresos vs salidas globales, top 8 por volumen total.
-        var flujo = movimientos
-            .GroupBy(m => m.Material != null ? m.Material.Nombre : "—")
+        var flujo = agregados
+            .GroupBy(a => nombresMaterial.TryGetValue(a.MaterialId, out var n) ? n : "—")
             .Select(g => new AlmacenDashboardFlujoItemDTO
             {
                 MaterialNombre = g.Key,
-                TotalIngresos = g.Where(m => TipoMovimientoAlmacen.SumanStock.Contains(m.Tipo)).Sum(m => m.Cantidad),
-                TotalSalidas = g.Where(m => m.Tipo == TipoMovimientoAlmacen.Salida).Sum(m => m.Cantidad)
+                TotalIngresos = g.Sum(a => a.TotalIngresos),
+                TotalSalidas = g.Sum(a => a.TotalSalidas)
             })
             .OrderByDescending(f => f.TotalIngresos + f.TotalSalidas)
             .Take(8)
             .ToList();
 
         // 2) Participación por proyecto (consumo = salidas), agrupando el resto en "Otros".
-        var consumoPorProyecto = movimientos
+        var salidasPorProyecto = await query
             .Where(m => m.Tipo == TipoMovimientoAlmacen.Salida)
-            .GroupBy(m => m.Proyecto != null ? m.Proyecto.ProjectDescription : "—")
-            .Select(g => new { Proyecto = g.Key, Total = g.Sum(m => m.Cantidad) })
+            .GroupBy(m => m.ProyectoId)
+            .Select(g => new { ProyectoId = g.Key, Total = g.Sum(m => m.Cantidad) })
+            .ToListAsync();
+
+        var idsProyecto = salidasPorProyecto.Select(x => x.ProyectoId).Distinct().ToList();
+        var nombresProyecto = await ctx.Project
+            .Where(p => idsProyecto.Contains(p.ProjectId))
+            .ToDictionaryAsync(p => p.ProjectId, p => p.ProjectDescription);
+
+        var consumoPorProyecto = salidasPorProyecto
+            .GroupBy(x => nombresProyecto.TryGetValue(x.ProyectoId, out var n) ? n : "—")
+            .Select(g => new { Proyecto = g.Key, Total = g.Sum(x => x.Total) })
             .OrderByDescending(g => g.Total)
             .ToList();
 
@@ -287,12 +310,7 @@ public class MaterialRepository : IMaterialRepository
             .Where(m => m.Activo && m.PuntoReorden != null && m.StockSeguridad != null)
             .ToListAsync();
 
-        var stockPorMaterial = movimientos
-            .GroupBy(m => m.MaterialId)
-            .ToDictionary(
-                g => g.Key,
-                g => g.Where(m => TipoMovimientoAlmacen.SumanStock.Contains(m.Tipo)).Sum(m => m.Cantidad)
-                    - g.Where(m => m.Tipo == TipoMovimientoAlmacen.Salida).Sum(m => m.Cantidad));
+        var stockPorMaterial = agregados.ToDictionary(a => a.MaterialId, a => a.TotalIngresos - a.TotalSalidas);
 
         var criticos = new List<AlmacenMaterialCriticoDTO>();
         foreach (var m in materiales)

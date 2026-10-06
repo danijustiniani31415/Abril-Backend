@@ -83,6 +83,28 @@ namespace Abril_Backend.Application.DTOs.ArquitecturaComercial
         /// <summary>Carga (ponderada) semana a semana de las últimas 8 semanas — para distinguir
         /// una sobrecarga puntual de un patrón repetido.</summary>
         public List<CargaSemanalDTO> TendenciaCarga { get; set; } = new();
+        /// <summary>Carga ponderada día a día (lun–vie) de la semana pasada y la actual — para ver
+        /// en qué días puntuales tocó sobrecarga.</summary>
+        public List<CargaDiariaDTO> CargaDiaria { get; set; } = new();
+    }
+
+    /// <summary>Carga ponderada de un día hábil puntual (reconstruida con las fechas de inicio/fin
+    /// de las actividades), con la media del equipo ese mismo día para clasificarla.</summary>
+    public class CargaDiariaDTO
+    {
+        /// <summary>yyyy-MM-dd.</summary>
+        public string Fecha { get; set; } = string.Empty;
+        /// <summary>Lun, Mar, Mié, Jue, Vie.</summary>
+        public string Dia { get; set; } = string.Empty;
+        public bool EsSemanaActual { get; set; }
+        public int Hitos { get; set; }
+        public int Entregables { get; set; }
+        public int Consultas { get; set; }
+        public int Total { get; set; }
+        public double TotalPonderado { get; set; }
+        public double PromedioEquipo { get; set; }
+        /// <summary>SOBRECARGADO | NORMAL | DISPONIBLE.</summary>
+        public string Tag { get; set; } = string.Empty;
     }
 
     /// <summary>Carga ponderada de una semana puntual, con el promedio del equipo esa misma
