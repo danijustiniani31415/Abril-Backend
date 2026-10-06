@@ -43,6 +43,6 @@ public interface IAccidenteIncidenteService
 
     // Antecedentes de eventos
     Task<object> BuscarAntecedentesAsync(string palabraClave, int? proyectoId, int? tipoId,
-        DateTime? fechaDesde, DateTime? fechaHasta, int page, int pageSize);
+        DateTime? fechaDesde, DateTime? fechaHasta, int page, int pageSize, string modo = "cualquiera");
     Task<byte[]> GenerarPdfAntecedentesAsync(ExportarAntecedentesRequest req);
 }

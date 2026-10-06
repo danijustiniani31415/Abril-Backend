@@ -357,12 +357,13 @@ public class AccidenteIncidenteController : ControllerBase
         [FromQuery] DateTime? fechaDesde,
         [FromQuery] DateTime? fechaHasta,
         [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20)
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string modo = "cualquiera")
     {
         if (string.IsNullOrWhiteSpace(palabraClave))
             return StatusCode(400, new { message = "Debe ingresar una palabra clave para buscar." });
 
-        try { return Ok(await _service.BuscarAntecedentesAsync(palabraClave, proyectoId, tipoId, fechaDesde, fechaHasta, page, pageSize)); }
+        try { return Ok(await _service.BuscarAntecedentesAsync(palabraClave, proyectoId, tipoId, fechaDesde, fechaHasta, page, pageSize, modo)); }
         catch (AbrilException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message }); }
         catch (Exception ex) { _logger.LogError(ex, "Error buscando antecedentes de eventos"); return StatusCode(500, new { message = "Error del servidor." }); }
     }

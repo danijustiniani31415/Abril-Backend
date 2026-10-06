@@ -415,9 +415,9 @@ public class AccidenteIncidenteService : IAccidenteIncidenteService
     // ── Antecedentes de eventos ──────────────────────────────────────────────
 
     public async Task<object> BuscarAntecedentesAsync(string palabraClave, int? proyectoId, int? tipoId,
-        DateTime? fechaDesde, DateTime? fechaHasta, int page, int pageSize)
+        DateTime? fechaDesde, DateTime? fechaHasta, int page, int pageSize, string modo = "cualquiera")
     {
-        var (items, total) = await _repo.BuscarAntecedentesAsync(palabraClave, proyectoId, tipoId, fechaDesde, fechaHasta, page, pageSize);
+        var (items, total) = await _repo.BuscarAntecedentesAsync(palabraClave, proyectoId, tipoId, fechaDesde, fechaHasta, page, pageSize, modo);
         return new { items, total, page, pageSize, totalPages = (int)Math.Ceiling((double)total / pageSize) };
     }
 

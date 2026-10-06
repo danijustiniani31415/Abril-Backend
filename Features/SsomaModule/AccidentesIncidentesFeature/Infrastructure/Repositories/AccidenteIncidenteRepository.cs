@@ -765,14 +765,42 @@ public class AccidenteIncidenteRepository : IAccidenteIncidenteRepository
 
     public async Task<(List<AntecedenteItemDto> Items, int Total)> BuscarAntecedentesAsync(
         string palabraClave, int? proyectoId, int? tipoId,
-        DateTime? fechaDesde, DateTime? fechaHasta, int page, int pageSize)
+        DateTime? fechaDesde, DateTime? fechaHasta, int page, int pageSize, string modo = "cualquiera")
     {
-        var where = new List<string>
-        {
-            "(a.descripcion ~* @kw OR a.dano_proceso ~* @kw OR a.acciones_inmediatas ~* @kw OR a.lugar_exacto ~* @kw)"
-        };
+        // Insensible a tildes/ñ: se normaliza el texto de las columnas con translate() y el término en C#
+        const string tr = "translate({0}, 'áéíóúüñÁÉÍÓÚÜÑ', 'aeiouunAEIOUUN')";
+        string T(string c) => string.Format(tr, c);
+        string cols = $"({T("a.descripcion")} ~* @{{0}} OR {T("a.dano_proceso")} ~* @{{0}} OR {T("a.acciones_inmediatas")} ~* @{{0}} OR {T("a.lugar_exacto")} ~* @{{0}})";
+        static string SinTildes(string s) => new string(
+            s.Normalize(System.Text.NormalizationForm.FormD)
+             .Where(ch => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch) != System.Globalization.UnicodeCategory.NonSpacingMark)
+             .ToArray()).Normalize(System.Text.NormalizationForm.FormC);
+        palabraClave = SinTildes(palabraClave);
+        var where = new List<string>();
         var p = new DynamicParameters();
-        p.Add("kw", palabraClave);
+        // Palabras separadas por espacio, coma o |
+        var terminos = System.Text.RegularExpressions.Regex
+            .Split(palabraClave.Trim(), @"[\s,|]+")
+            .Where(t => t.Length > 0)
+            .Select(System.Text.RegularExpressions.Regex.Escape)
+            .Distinct()
+            .ToList();
+        if (terminos.Count == 0) terminos.Add(System.Text.RegularExpressions.Regex.Escape(palabraClave.Trim()));
+        if (string.Equals(modo, "todas", StringComparison.OrdinalIgnoreCase))
+        {
+            // Restrictivo: todas las palabras deben aparecer
+            for (var i = 0; i < terminos.Count; i++)
+            {
+                where.Add(string.Format(cols, $"kw{i}"));
+                p.Add($"kw{i}", terminos[i]);
+            }
+        }
+        else
+        {
+            // Amplio: coincide con cualquiera de las palabras
+            where.Add(string.Format(cols, "kw"));
+            p.Add("kw", string.Join("|", terminos));
+        }
         p.Add("offset", (page - 1) * pageSize);
         p.Add("limit", pageSize);
 

@@ -44,6 +44,6 @@ public interface IAccidenteIncidenteRepository
     // Antecedentes de eventos
     Task<(List<AntecedenteItemDto> Items, int Total)> BuscarAntecedentesAsync(
         string palabraClave, int? proyectoId, int? tipoId,
-        DateTime? fechaDesde, DateTime? fechaHasta, int page, int pageSize);
+        DateTime? fechaDesde, DateTime? fechaHasta, int page, int pageSize, string modo = "cualquiera");
     Task<List<AntecedenteItemDto>> GetAntecedentesPorIdsAsync(List<int> ids);
 }
