@@ -2227,7 +2227,7 @@ public class AtsRepository : IAtsRepository
         await ctx.SaveChangesAsync();
     }
 
-    /// <summary>Acotado al proyecto del grupo y a trabajadores Activos que ya tienen la
+    /// <summary>Acotado al proyecto del grupo (más el personal Staff/Oficina Central, que firma en cualquier obra) y a trabajadores Activos que ya tienen la
     /// autorización de firma digital — no tiene sentido ofrecerle la opción a alguien que de
     /// todas formas el backend va a rechazar al intentar firmar (ExigirAutorizacionPermiso).</summary>
     public async Task<List<AtsGrupoWorkerOpcionDto>> GetWorkersParaAdhesion(int proyectoId)
@@ -2240,7 +2240,9 @@ public class AtsRepository : IAtsRepository
             .ToListAsync();
 
         var workers = await ctx.Worker
-            .Where(w => workerIdsDelProyecto.Contains(w.Id)
+            .Where(w => (workerIdsDelProyecto.Contains(w.Id)
+                    // Staff y Oficina Central rotan entre obras (inspecciones, apoyo, varios proyectos a la vez): firman en cualquiera.
+                    || (w.ObraOficinaStaffId != null && Abril_Backend.Shared.Constants.ObraOficinaStaffIds.StaffUOficinaCentral.Contains(w.ObraOficinaStaffId.Value)))
                 && w.WorkersEstadoId == Abril_Backend.Shared.Constants.WorkersEstadoIds.Activo)
             .Include(w => w.Person)
             .ToListAsync();
